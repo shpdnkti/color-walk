@@ -215,9 +215,12 @@ test('adds an equal-size shortcut for the movie poster Ratio control', () => {
 test('shows live numeric values for font size and color ratio sliders', () => {
   assert.match(html, /id="fontSizeValue"/);
   assert.match(html, /id="ratioValue"/);
+  assert.match(html, /src="src\/app\.js\?v=[^"]+"/);
   assert.match(appJs, /fontSizeValue: document\.querySelector\('#fontSizeValue'\)/);
   assert.match(appJs, /ratioValue: document\.querySelector\('#ratioValue'\)/);
   assert.match(appJs, /function syncRangeValueOutputs\(\)/);
+  assert.match(appJs, /function handleStyleRangeInput/);
+  assert.match(appJs, /addEventListener\('change', handleStyleRangeInput\)/);
   assert.match(appJs, /els\.fontSizeValue\.textContent = state\.style\.fontSize \+ 'px'/);
   assert.match(appJs, /els\.ratioValue\.textContent = state\.style\.ratio \+ '%'/);
   assert.match(appJs, /function setEqualMovieRatio\(\) \{[\s\S]*?syncRangeValueOutputs\(\)/);

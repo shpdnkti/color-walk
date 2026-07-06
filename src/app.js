@@ -183,17 +183,8 @@ function bindEvents() {
   });
 
   [els.radiusInput, els.paddingInput, els.ratioInput, els.fontSizeInput].forEach(function (input) {
-    input.addEventListener('input', function () {
-      state.style.radius = Number(els.radiusInput.value);
-      state.style.padding = Number(els.paddingInput.value);
-      state.style.ratio = Number(els.ratioInput.value);
-      state.style.fontSize = Number(els.fontSizeInput.value);
-      if ((state.style.radius > 0 || state.style.padding > 0) && state.style.borderless) {
-        state.style.borderless = false;
-        els.borderlessInput.checked = false;
-      }
-      applyStyleControls();
-    });
+    input.addEventListener('input', handleStyleRangeInput);
+    input.addEventListener('change', handleStyleRangeInput);
   });
 
   els.borderlessInput.addEventListener('change', function () {
@@ -211,6 +202,18 @@ function bindEvents() {
     state.style.font = els.fontSelect.value;
     applyStyleControls();
   });
+}
+
+function handleStyleRangeInput() {
+  state.style.radius = Number(els.radiusInput.value);
+  state.style.padding = Number(els.paddingInput.value);
+  state.style.ratio = Number(els.ratioInput.value);
+  state.style.fontSize = Number(els.fontSizeInput.value);
+  if ((state.style.radius > 0 || state.style.padding > 0) && state.style.borderless) {
+    state.style.borderless = false;
+    els.borderlessInput.checked = false;
+  }
+  applyStyleControls();
 }
 
 function toggleMovieColorPosition() {
