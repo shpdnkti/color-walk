@@ -70,3 +70,20 @@ test('serializes palette swatch order for local draft restore', () => {
 
   assert.deepEqual(draft.paletteOrder, ['#ffeeaa', '#123456', '#abcdef']);
 });
+
+test('serializes palette swatch weights for local draft restore', () => {
+  const draft = parseDraft(serializeDraft({
+    paletteWeights: {
+      '#ffeeaa': 1.4,
+      '#123456': 0.6,
+      '#abcdef': 5,
+      invalid: 1.2,
+    },
+  }));
+
+  assert.deepEqual(draft.paletteWeights, {
+    '#ffeeaa': 1.4,
+    '#123456': 0.6,
+    '#abcdef': 2,
+  });
+});

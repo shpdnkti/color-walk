@@ -10,6 +10,7 @@ export function serializeDraft(input = {}) {
     movieColorOnTop: input.movieColorOnTop !== false,
     customColor: input.customColor || '#2a4252',
     paletteOrder: normalizePaletteOrder(input.paletteOrder),
+    paletteWeights: normalizePaletteWeights(input.paletteWeights),
     visionInsight: normalizeVisionInsight(input.visionInsight),
     fields: normalizeFields(input.fields),
     style: normalizeStyle(input.style),
@@ -29,6 +30,7 @@ export function parseDraft(value) {
       movieColorOnTop: draft.movieColorOnTop !== false,
       customColor: text(draft.customColor) || '#2a4252',
       paletteOrder: normalizePaletteOrder(draft.paletteOrder),
+      paletteWeights: normalizePaletteWeights(draft.paletteWeights),
       visionInsight: normalizeVisionInsight(draft.visionInsight),
       fields: normalizeFields(draft.fields),
       style: normalizeStyle(draft.style),
@@ -82,6 +84,17 @@ function normalizePaletteOrder(paletteOrder = []) {
     : [];
 }
 
+function normalizePaletteWeights(paletteWeights = {}) {
+  if (!paletteWeights || typeof paletteWeights !== 'object' || Array.isArray(paletteWeights)) return {};
+  return Object.entries(paletteWeights).slice(0, MAX_DRAFT_PHOTOS).reduce(function (result, entry) {
+    const hex = text(entry[0]).toLowerCase();
+    if (!isHexColor(hex)) return result;
+    const weight = Math.round(clamp(number(entry[1], 1), 0.5, 2) * 10) / 10;
+    if (weight !== 1) result[hex] = weight;
+    return result;
+  }, {});
+}
+
 function isHexColor(value) {
   return /^#[0-9a-f]{6}$/i.test(value);
 }
@@ -129,4 +142,8 @@ function text(value) {
 function number(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }

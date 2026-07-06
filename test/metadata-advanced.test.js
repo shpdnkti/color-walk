@@ -117,6 +117,19 @@ test('extracts HEIC metadata from embedded TIFF payloads', async () => {
   assert.equal(metadata.displayDate, '2026.07.08');
 });
 
+test('prefers HEIC box-referenced Exif items over unreferenced TIFF-like bytes', async () => {
+  const staleTiff = makeTiffWithDate('2026:01:02 03:04:05');
+  const referencedTiff = makeTiffWithDate('2026:03:04 05:06:07');
+  const exifPayload = joinBytes(new Uint8Array([0, 0, 0, 4]), referencedTiff);
+  const buffer = makeHeicWithExifItem(exifPayload, staleTiff);
+
+  const metadata = await extractMetadataFromBuffer(buffer, { type: 'image/heic', name: 'IMG_0003.HEIC' });
+
+  assert.equal(metadata.rawDate, '2026:03:04 05:06:07');
+  assert.equal(metadata.date, '2026-03-04');
+  assert.equal(metadata.displayDate, '2026.03.04');
+});
+
 test('extracts HEIC metadata from embedded XMP packets', async () => {
   const xmp = makeXmpPacket({
     date: '2026-11-12T13:14:15+08:00',
@@ -166,6 +179,64 @@ function makeHeicPrefix() {
     0, 0, 0, 24, 102, 116, 121, 112, 104, 101, 105, 99,
     0, 0, 0, 0, 104, 101, 105, 99, 109, 105, 102, 49,
   ]);
+}
+
+function makeHeicWithExifItem(exifPayload, unreferencedPayload) {
+  const prefix = makeHeicPrefix();
+  const free = box('free', unreferencedPayload);
+  const info = iinfBox(infeBox(1, 'Exif', 'Exif'));
+  let location = ilocBox(1, 0, exifPayload.byteLength);
+  let meta = metaBox(info, location);
+  const payloadOffset = prefix.byteLength + free.byteLength + meta.byteLength + 8;
+  location = ilocBox(1, payloadOffset, exifPayload.byteLength);
+  meta = metaBox(info, location);
+  return joinBytes(prefix, free, meta, box('mdat', exifPayload)).buffer;
+}
+
+function metaBox(...children) {
+  return box('meta', joinBytes(new Uint8Array([0, 0, 0, 0]), ...children));
+}
+
+function iinfBox(...entries) {
+  const data = new Uint8Array(6);
+  const view = new DataView(data.buffer);
+  view.setUint16(4, entries.length);
+  return box('iinf', joinBytes(data, ...entries));
+}
+
+function infeBox(itemId, itemType, itemName) {
+  const name = ascii(itemName + '\0');
+  const data = new Uint8Array(12 + name.byteLength);
+  const view = new DataView(data.buffer);
+  data[0] = 2;
+  view.setUint16(4, itemId);
+  view.setUint16(6, 0);
+  data.set(ascii(itemType), 8);
+  data.set(name, 12);
+  return box('infe', data);
+}
+
+function ilocBox(itemId, offset, length) {
+  const data = new Uint8Array(22);
+  const view = new DataView(data.buffer);
+  data[4] = 0x44;
+  view.setUint16(6, 1);
+  view.setUint16(8, itemId);
+  view.setUint16(10, 0);
+  view.setUint16(12, 1);
+  view.setUint32(14, offset);
+  view.setUint32(18, length);
+  return box('iloc', data);
+}
+
+function box(type, data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const result = new Uint8Array(8 + bytes.length);
+  const view = new DataView(result.buffer);
+  view.setUint32(0, result.byteLength);
+  result.set(ascii(type), 4);
+  result.set(bytes, 8);
+  return result;
 }
 
 function makePng(chunks) {

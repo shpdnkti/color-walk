@@ -90,3 +90,12 @@ test('nginx configuration supports browser module assets and single-page fallbac
   assert.match(nginx, /location ~\* \\\.\(js\|css\|png\|jpg\|jpeg\|gif\|svg\|ico\|webp\)\$/);
   assert.match(nginx, /add_header Cache-Control "public, max-age=604800, immutable";/);
 });
+
+test('documents an opt-in export and preview consistency smoke check', async () => {
+  const packageJson = JSON.parse(await readProjectFile('package.json'));
+  const readme = await readProjectFile('README.md');
+
+  assert.equal(packageJson.scripts['test:export-preview'], 'node scripts/export-preview-smoke.mjs');
+  assert.match(readme, /npm run test:export-preview/);
+  assert.match(readme, /COLOR_WALK_RUN_EXPORT_PREVIEW_SMOKE=1/);
+});

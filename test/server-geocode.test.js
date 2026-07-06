@@ -60,6 +60,27 @@ test('reverse-geocode proxies GPS coordinates to a configured upstream and retur
   assert.equal(upstreamRequests[0].userAgent, 'ColorWalkTest/1.0');
 });
 
+test('reverse-geocode returns a clear error when the upstream cannot be queried', async (t) => {
+  const closedServer = http.createServer();
+  const closedPort = await listenOnLocalhost(closedServer);
+  await closeServer(closedServer);
+
+  const originalEnv = captureGeocodeEnv();
+  process.env.GEOCODE_REVERSE_URL = 'http://127.0.0.1:' + closedPort + '/reverse';
+  process.env.GEOCODE_USER_AGENT = 'ColorWalkTest/1.0';
+  t.after(function () { restoreGeocodeEnv(originalEnv); });
+
+  const app = createColorWalkServer();
+  const appPort = await listenOnLocalhost(app);
+  t.after(async function () { await closeServer(app); });
+
+  const response = await fetch('http://127.0.0.1:' + appPort + '/api/reverse-geocode?lat=31.230001&lon=121.472778&lang=zh-CN');
+  const payload = await response.json();
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(payload, { error: 'reverse_geocode_unavailable' });
+});
+
 function listenOnLocalhost(server) {
   return new Promise(function (resolve, reject) {
     server.once('error', reject);

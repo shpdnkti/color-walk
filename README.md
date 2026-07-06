@@ -68,3 +68,9 @@ node --check src/app.js src/exif.js src/geocode.js src/draft.js server.js server
 docker compose config
 docker compose -f docker-compose.preview.yml config
 ```
+
+导出/预览一致性有一个可选浏览器冒烟检查，不会随默认 `npm test` 运行。需要本机已有 Playwright 浏览器二进制时再启用；没有浏览器工具时脚本会跳过，不会访问外部网络。
+
+```bash
+COLOR_WALK_RUN_EXPORT_PREVIEW_SMOKE=1 npm run test:export-preview
+```

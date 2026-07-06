@@ -36,6 +36,7 @@ const state = {
   draggedPhotoId: null,
   draggedColorIndex: null,
   paletteOrder: [],
+  paletteWeights: {},
   visionInsight: null,
   photoTransforms: new Map(),
   imageGesture: {
@@ -75,6 +76,7 @@ const els = {
   fileInput: document.querySelector('#fileInput'),
   resetButton: document.querySelector('#resetButton'),
   stashButton: document.querySelector('#stashButton'),
+  clearDraftButton: document.querySelector('#clearDraftButton'),
   placeInput: document.querySelector('#placeInput'),
   dateInput: document.querySelector('#dateInput'),
   timeInput: document.querySelector('#timeInput'),
@@ -138,6 +140,7 @@ function bindEvents() {
   els.fileInput.addEventListener('change', handleFiles);
   els.resetButton.addEventListener('click', handleResetUpload);
   els.stashButton.addEventListener('click', stashDraft);
+  els.clearDraftButton.addEventListener('click', clearSavedDraft);
   els.aiAnalyzeButton.addEventListener('click', analyzePhotosWithAI);
   els.copyGenerateButton.addEventListener('click', function () {
     state.copyDirty = false;
@@ -314,6 +317,7 @@ async function reverseGeocodePhoto(photo) {
       // Try the next configured endpoint; the coordinate label remains usable offline.
     }
   }
+  els.exportStatus.textContent = '无法反查地点，请检查网络或稍后重试。';
 }
 
 function applyReverseGeocodeLabel(label, photo) {
@@ -839,6 +843,9 @@ function renderPhotos() {
       movePhoto(draggedId, photo.id);
     });
 
+    const thumb = document.createElement('div');
+    thumb.className = 'photo-thumb';
+
     const img = document.createElement('img');
     img.src = photo.src;
     img.alt = photo.fileName;
@@ -863,8 +870,95 @@ function renderPhotos() {
       renderAll();
     });
 
-    card.append(img, chip, remove);
+    thumb.append(img, chip, remove);
+    card.append(thumb, createPhotoCropControls(photo));
     els.photoGrid.append(card);
+  });
+}
+
+function createPhotoCropControls(photo) {
+  const controls = document.createElement('div');
+  controls.className = 'photo-crop-controls';
+  controls.dataset.photoId = photo.id;
+  controls.setAttribute('aria-label', '调整 ' + photo.fileName + ' 裁切');
+  controls.addEventListener('pointerdown', stopPhotoCardControlEvent);
+  controls.addEventListener('dragstart', stopPhotoCardControlEvent);
+
+  const field = document.createElement('label');
+  field.className = 'photo-crop-field';
+  const labelRow = document.createElement('span');
+  labelRow.className = 'photo-crop-label';
+  const labelText = document.createElement('span');
+  labelText.textContent = '裁切';
+  const value = document.createElement('output');
+  value.className = 'photo-crop-value';
+  labelRow.append(labelText, value);
+
+  const slider = document.createElement('input');
+  slider.className = 'photo-crop-slider';
+  slider.type = 'range';
+  slider.min = '100';
+  slider.max = '400';
+  slider.step = '5';
+  slider.setAttribute('aria-label', '调整 ' + photo.fileName + ' 裁切缩放');
+  slider.addEventListener('input', function (event) {
+    event.stopPropagation();
+    setPhotoCropScale(photo.id, Number(slider.value) / 100);
+    els.exportStatus.textContent = '图片裁切缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+  });
+  field.append(labelRow, slider);
+
+  controls.append(
+    field,
+    createPhotoCropButton(photo, 'zoom-out', '−', '缩小 ' + photo.fileName + ' 裁切'),
+    createPhotoCropButton(photo, 'zoom-in', '+', '放大 ' + photo.fileName + ' 裁切'),
+    createPhotoCropButton(photo, 'reset', '↺', '重置 ' + photo.fileName + ' 裁切'),
+  );
+  updatePhotoCropControls(controls, photo.id);
+  return controls;
+}
+
+function createPhotoCropButton(photo, action, label, ariaLabel) {
+  const button = document.createElement('button');
+  button.className = 'photo-crop-button';
+  button.type = 'button';
+  button.textContent = label;
+  button.setAttribute('data-crop-action', action);
+  button.setAttribute('aria-label', ariaLabel);
+  button.addEventListener('click', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const transform = getPhotoTransform(photo.id);
+    if (action === 'zoom-out') setPhotoCropScale(photo.id, transform.scale - 0.1);
+    if (action === 'zoom-in') setPhotoCropScale(photo.id, transform.scale + 0.1);
+    if (action === 'reset') resetPhotoTransform(photo.id);
+    els.exportStatus.textContent = action === 'reset'
+      ? '图片裁切已重置。'
+      : '图片裁切缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+  });
+  return button;
+}
+
+function stopPhotoCardControlEvent(event) {
+  event.stopPropagation();
+}
+
+function updatePhotoCropControls(controls, photoId) {
+  const transform = getPhotoTransform(photoId);
+  const percent = Math.round(transform.scale * 100);
+  const slider = controls.querySelector('.photo-crop-slider');
+  const value = controls.querySelector('.photo-crop-value');
+  const zoomOut = controls.querySelector('[data-crop-action="zoom-out"]');
+  const reset = controls.querySelector('[data-crop-action="reset"]');
+  if (slider) slider.value = String(percent);
+  if (value) value.textContent = percent + '%';
+  if (zoomOut) zoomOut.disabled = percent <= 100;
+  if (reset) reset.disabled = percent <= 100 && transform.x === 0 && transform.y === 0;
+}
+
+function syncPhotoCropControls(photoId) {
+  els.photoGrid.querySelectorAll('.photo-crop-controls[data-photo-id="' + cssEscape(photoId) + '"]').forEach(function (controls) {
+    updatePhotoCropControls(controls, photoId);
   });
 }
 
@@ -898,6 +992,9 @@ function renderPalette() {
   els.averageColor.textContent = state.photos.length ? summary.average.hex.toUpperCase() : '等待图片';
 
   colors.slice(0, 6).forEach(function (hex, index) {
+    const item = document.createElement('div');
+    item.className = 'palette-swatch-item';
+
     const swatch = document.createElement('button');
     swatch.type = 'button';
     swatch.className = 'palette-swatch';
@@ -906,6 +1003,7 @@ function renderPalette() {
     swatch.setAttribute('aria-label', '拖拽调整色块位置，点击应用 ' + hex.toUpperCase());
     swatch.style.background = hex;
     swatch.style.color = getReadableTextColor(hex);
+    swatch.style.flexGrow = String(getPaletteColorWeight(hex));
     swatch.innerHTML = '<strong>' + describeColor(hex) + '</strong><span>' + hex.toUpperCase() + '</span>';
     swatch.addEventListener('dragstart', function (event) {
       state.draggedColorIndex = index;
@@ -932,8 +1030,56 @@ function renderPalette() {
       renderPreview();
       els.exportStatus.textContent = hex.toUpperCase() + ' 已应用为预览强调色。';
     });
-    els.paletteStrip.append(swatch);
+
+    item.append(swatch, createPaletteSizeControls(hex));
+    els.paletteStrip.append(item);
   });
+}
+
+function createPaletteSizeControls(hex) {
+  const controls = document.createElement('div');
+  controls.className = 'palette-size-controls';
+  controls.setAttribute('aria-label', '调整 ' + hex.toUpperCase() + ' 色块尺寸');
+  controls.append(
+    createPaletteSizeButton(hex, 'smaller', '-', '缩小 ' + hex.toUpperCase() + ' 色块'),
+    createPaletteSizeButton(hex, 'larger', '+', '放大 ' + hex.toUpperCase() + ' 色块'),
+    createPaletteSizeButton(hex, 'reset', '1:1', '重置 ' + hex.toUpperCase() + ' 色块尺寸'),
+  );
+  return controls;
+}
+
+function createPaletteSizeButton(hex, action, label, ariaLabel) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'palette-size-button';
+  button.textContent = label;
+  button.setAttribute('data-palette-size-action', action);
+  button.setAttribute('aria-label', ariaLabel);
+  button.addEventListener('click', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = getPaletteColorWeight(hex);
+    if (action === 'smaller') setPaletteColorWeight(hex, current - 0.2);
+    if (action === 'larger') setPaletteColorWeight(hex, current + 0.2);
+    if (action === 'reset') setPaletteColorWeight(hex, 1);
+  });
+  return button;
+}
+
+function setPaletteColorWeight(hex, weight) {
+  const key = normalizeHexColor(hex);
+  if (!key) return;
+  const next = Math.round(clamp(Number(weight) || 1, 0.5, 2) * 10) / 10;
+  if (next === 1) delete state.paletteWeights[key];
+  else state.paletteWeights[key] = next;
+  renderAll();
+  els.exportStatus.textContent = key.toUpperCase() + ' 色块占比已调整为 ' + next.toFixed(1) + '。';
+}
+
+function getPaletteColorWeight(hex) {
+  const key = normalizeHexColor(hex);
+  const weight = key ? Number(state.paletteWeights[key]) : 1;
+  return Number.isFinite(weight) ? clamp(weight, 0.5, 2) : 1;
 }
 
 function renderPreview() {
@@ -976,6 +1122,7 @@ function renderPreview() {
     const swatch = document.createElement('div');
     swatch.className = 'preview-swatch';
     swatch.style.background = hex;
+    swatch.style.flexGrow = String(getPaletteColorWeight(hex));
     swatches.append(swatch);
   });
 
@@ -1167,7 +1314,31 @@ function getPhotoTransform(photoId) {
 
 function setPhotoTransform(photoId, transform) {
   state.photoTransforms.set(photoId, clampPhotoTransform(transform));
+  applyPhotoTransformToPreviewInstances(photoId);
+  syncPhotoCropControls(photoId);
   scheduleDraftSave();
+}
+
+function setPhotoCropScale(photoId, scale) {
+  const transform = getPhotoTransform(photoId);
+  setPhotoTransform(photoId, {
+    scale,
+    x: transform.x,
+    y: transform.y,
+  });
+}
+
+function resetPhotoTransform(photoId) {
+  state.photoTransforms.delete(photoId);
+  applyPhotoTransformToPreviewInstances(photoId);
+  syncPhotoCropControls(photoId);
+  scheduleDraftSave();
+}
+
+function applyPhotoTransformToPreviewInstances(photoId) {
+  els.previewCanvas.querySelectorAll('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]').forEach(function (element) {
+    applyPhotoTransformToElement(element, photoId);
+  });
 }
 
 function applyPhotoTransformToElement(element, photoId) {
@@ -1187,6 +1358,13 @@ function clampPhotoTransform(transform) {
     x: scale <= 1 ? 0 : clamp(transform.x || 0, -maxOffset, maxOffset),
     y: scale <= 1 ? 0 : clamp(transform.y || 0, -maxOffset, maxOffset),
   };
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(String(value));
+  const slash = String.fromCharCode(92);
+  const quote = String.fromCharCode(34);
+  return String(value).split(slash).join(slash + slash).split(quote).join(slash + quote);
 }
 
 function applyStyleControls() {
@@ -1219,6 +1397,17 @@ function stashDraft() {
   saveDraft(true);
 }
 
+function clearSavedDraft() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = 0;
+  try {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    els.exportStatus.textContent = '本地草稿已清除，当前画布保留。';
+  } catch (error) {
+    els.exportStatus.textContent = '草稿清除失败，请检查浏览器存储权限。';
+  }
+}
+
 function scheduleDraftSave() {
   if (state.restoringDraft) return;
   clearTimeout(draftSaveTimer);
@@ -1241,6 +1430,7 @@ function getDraftSnapshot() {
     movieColorOnTop: state.movieColorOnTop,
     customColor: state.customColor,
     paletteOrder: state.paletteOrder,
+    paletteWeights: state.paletteWeights,
     visionInsight: state.visionInsight,
     fields: {
       place: els.placeInput.value,
@@ -1280,6 +1470,7 @@ async function restoreDraft() {
     state.movieColorOnTop = draft.movieColorOnTop;
     state.customColor = draft.customColor;
     state.paletteOrder = draft.paletteOrder;
+    state.paletteWeights = draft.paletteWeights;
     state.visionInsight = draft.visionInsight;
     state.style = { ...state.style, ...draft.style };
     els.placeInput.value = draft.fields.place;
@@ -1323,11 +1514,41 @@ function syncStyleInputs() {
 
 async function copyCurrentText() {
   const text = [els.titleInput.value, els.bodyInput.value, els.tagsInput.value].filter(Boolean).join('\n');
+  const copied = await copyTextToClipboard(text);
+  els.exportStatus.textContent = copied ? '文案已复制。' : '复制失败，请手动选择文本复制。';
+}
+
+async function copyTextToClipboard(text) {
   try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable');
     await navigator.clipboard.writeText(text);
-    els.exportStatus.textContent = '文案已复制。';
+    return true;
   } catch (error) {
-    els.exportStatus.textContent = '复制失败，请手动选择文本复制。';
+    return copyTextWithSelectionFallback(text);
+  }
+}
+
+function copyTextWithSelectionFallback(text) {
+  if (typeof document.execCommand !== 'function') return false;
+
+  const activeElement = document.activeElement;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.inset = '0 auto auto -9999px';
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  try {
+    return document.execCommand('copy');
+  } catch (error) {
+    return false;
+  } finally {
+    textarea.remove();
+    if (activeElement && typeof activeElement.focus === 'function') activeElement.focus();
   }
 }
 
@@ -1344,6 +1565,9 @@ async function exportPng() {
   const ctx = canvas.getContext('2d');
   try {
     await drawPreviewDomToCanvas(ctx, canvas.width, canvas.height);
+    if (isCanvasSnapshotSuspicious(ctx, canvas.width, canvas.height)) {
+      drawExport(ctx, canvas.width, canvas.height);
+    }
   } catch (error) {
     drawExport(ctx, canvas.width, canvas.height);
   }
@@ -1367,6 +1591,20 @@ function getDomExportHeight(width) {
   const rect = els.previewCanvas.getBoundingClientRect();
   if (rect.width > 0 && rect.height > 0) return Math.round(width * (rect.height / rect.width));
   return state.selectedLayout === 'movie-poster' ? getMoviePosterExportHeight(width) : getOutputExportHeight(width);
+}
+
+function isCanvasSnapshotSuspicious(ctx, width, height) {
+  const points = [
+    [0.12, 0.12], [0.5, 0.12], [0.88, 0.12],
+    [0.12, 0.5], [0.5, 0.5], [0.88, 0.5],
+    [0.12, 0.88], [0.5, 0.88], [0.88, 0.88],
+  ];
+  return points.every(function (point) {
+    const x = Math.min(width - 1, Math.max(0, Math.round(point[0] * width)));
+    const y = Math.min(height - 1, Math.max(0, Math.round(point[1] * height)));
+    const pixel = ctx.getImageData(x, y, 1, 1).data;
+    return pixel[3] === 0 || (pixel[0] < 3 && pixel[1] < 3 && pixel[2] < 3);
+  });
 }
 
 async function drawPreviewDomToCanvas(ctx, width, height) {
@@ -1536,11 +1774,22 @@ function drawImageGrid(ctx, x, y, w, h, columns, gap) {
 
 function drawPalette(ctx, x, y, w, h, vertical) {
   const colors = getPaletteColors();
-  const size = vertical ? h / colors.length : w / colors.length;
-  colors.forEach(function (hex, index) {
-    ctx.fillStyle = hex;
-    if (vertical) ctx.fillRect(x, y + index * size, w, size + 1);
-    else ctx.fillRect(x + index * size, y, size + 1, h);
+  getPaletteSizeSegments(colors, vertical ? h : w).forEach(function (segment) {
+    ctx.fillStyle = segment.hex;
+    if (vertical) ctx.fillRect(x, y + segment.offset, w, segment.size + 1);
+    else ctx.fillRect(x + segment.offset, y, segment.size + 1, h);
+  });
+}
+
+function getPaletteSizeSegments(colors, totalSize) {
+  const weights = colors.map(getPaletteColorWeight);
+  const totalWeight = weights.reduce(function (sum, weight) { return sum + weight; }, 0) || colors.length || 1;
+  let offset = 0;
+  return colors.map(function (hex, index) {
+    const size = index === colors.length - 1 ? totalSize - offset : totalSize * (weights[index] / totalWeight);
+    const segment = { hex, offset, size };
+    offset += size;
+    return segment;
   });
 }
 
@@ -1696,6 +1945,7 @@ function resetApp() {
   state.photos = [];
   state.photoTransforms.clear();
   state.paletteOrder = [];
+  state.paletteWeights = {};
   state.imageGesture.activePhotoId = null;
   state.imageGesture.pointerId = null;
   state.imageGesture.pointers.clear();

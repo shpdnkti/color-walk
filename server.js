@@ -127,20 +127,27 @@ async function handleReverseGeocode(url, response) {
   upstreamUrl.searchParams.set('lat', String(lat));
   upstreamUrl.searchParams.set('lon', String(lon));
 
-  const upstream = await fetch(upstreamUrl, {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': process.env.GEOCODE_USER_AGENT || DEFAULT_GEOCODE_USER_AGENT,
-      Referer: DEFAULT_GEOCODE_REFERER,
-    },
-  });
+  let upstream;
+  let data;
+  try {
+    upstream = await fetch(upstreamUrl, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': process.env.GEOCODE_USER_AGENT || DEFAULT_GEOCODE_USER_AGENT,
+        Referer: DEFAULT_GEOCODE_REFERER,
+      },
+    });
 
-  if (!upstream.ok) {
-    sendJson(response, 502, { error: 'reverse_geocode_failed', status: upstream.status });
+    if (!upstream.ok) {
+      sendJson(response, 502, { error: 'reverse_geocode_failed', status: upstream.status });
+      return;
+    }
+
+    data = await upstream.json();
+  } catch (error) {
+    sendJson(response, 502, { error: 'reverse_geocode_unavailable' });
     return;
   }
-
-  const data = await upstream.json();
   sendJson(response, 200, {
     label: formatReverseGeocodeLabel(data),
     source: 'nominatim',

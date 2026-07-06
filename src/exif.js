@@ -213,6 +213,10 @@ async function parsePngMetadata(view) {
 
 function parseHeicMetadata(view, fileInfo) {
   if (!looksLikeHeic(view, fileInfo)) return null;
+
+  const referencedExif = parseHeicReferencedExif(view);
+  if (referencedExif) return referencedExif;
+
   const tiffStart = findTiffHeader(view);
   if (tiffStart !== -1) return readTiff(view, tiffStart);
 
@@ -220,6 +224,203 @@ function parseHeicMetadata(view, fileInfo) {
   if (!xmpPacket) return null;
   const parsed = xmpTextToParsed({ xmp: xmpPacket });
   return hasParsedMetadata(parsed) ? parsed : null;
+}
+
+function parseHeicReferencedExif(view) {
+  const metaBox = findHeicMetaBox(view);
+  if (!metaBox || metaBox.dataStart + 4 > metaBox.dataEnd) return null;
+
+  const itemTypes = readHeicItemTypes(view, metaBox.dataStart + 4, metaBox.dataEnd);
+  const exifIds = Array.from(itemTypes.entries())
+    .filter(function (entry) { return entry[1].type === 'Exif' || entry[1].name.toLowerCase() === 'exif'; })
+    .map(function (entry) { return entry[0]; });
+  if (!exifIds.length) return null;
+
+  const locations = readHeicItemLocations(view, metaBox.dataStart + 4, metaBox.dataEnd);
+  for (const itemId of exifIds) {
+    const location = locations.get(itemId);
+    const parsed = location ? readHeicExifPayload(view, location.offset, location.length) : null;
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function findHeicMetaBox(view) {
+  return readHeicBoxes(view, 0, view.byteLength).find(function (box) { return box.type === 'meta'; }) || null;
+}
+
+function readHeicItemTypes(view, start, end) {
+  const itemTypes = new Map();
+  const info = readHeicBoxes(view, start, end).find(function (box) { return box.type === 'iinf'; });
+  if (!info || info.dataStart + 6 > info.dataEnd) return itemTypes;
+
+  const version = view.getUint8(info.dataStart);
+  let offset = info.dataStart + 4;
+  const entryCount = version === 0 ? view.getUint16(offset, false) : view.getUint32(offset, false);
+  offset += version === 0 ? 2 : 4;
+
+  for (const entry of readHeicBoxes(view, offset, info.dataEnd).slice(0, entryCount)) {
+    if (entry.type !== 'infe') continue;
+    const parsed = readHeicItemInfoEntry(view, entry);
+    if (parsed) itemTypes.set(parsed.id, parsed);
+  }
+  return itemTypes;
+}
+
+function readHeicItemInfoEntry(view, box) {
+  if (box.dataStart + 8 > box.dataEnd) return null;
+  const version = view.getUint8(box.dataStart);
+  let offset = box.dataStart + 4;
+  let id;
+  let type = '';
+
+  if (version >= 2) {
+    if (version === 2) {
+      if (offset + 8 > box.dataEnd) return null;
+      id = view.getUint16(offset, false);
+      offset += 2;
+    } else {
+      if (offset + 10 > box.dataEnd) return null;
+      id = view.getUint32(offset, false);
+      offset += 4;
+    }
+    offset += 2;
+    type = readAscii(view, offset, 4);
+    offset += 4;
+  } else {
+    id = view.getUint16(offset, false);
+    offset += 4;
+  }
+
+  return {
+    id,
+    type,
+    name: readNullTerminatedAscii(view, offset, box.dataEnd),
+  };
+}
+
+function readHeicItemLocations(view, start, end) {
+  const locations = new Map();
+  const locationBox = readHeicBoxes(view, start, end).find(function (box) { return box.type === 'iloc'; });
+  if (!locationBox || locationBox.dataStart + 8 > locationBox.dataEnd) return locations;
+
+  const version = view.getUint8(locationBox.dataStart);
+  let offset = locationBox.dataStart + 4;
+  const sizes = view.getUint8(offset);
+  const offsetSize = sizes >> 4;
+  const lengthSize = sizes & 0x0f;
+  const baseAndIndexSizes = view.getUint8(offset + 1);
+  const baseOffsetSize = baseAndIndexSizes >> 4;
+  const indexSize = version === 1 || version === 2 ? baseAndIndexSizes & 0x0f : 0;
+  offset += 2;
+
+  if (offset + (version < 2 ? 2 : 4) > locationBox.dataEnd) return locations;
+  const itemCount = version < 2 ? view.getUint16(offset, false) : view.getUint32(offset, false);
+  offset += version < 2 ? 2 : 4;
+
+  for (let index = 0; index < itemCount && offset < locationBox.dataEnd; index += 1) {
+    if (offset + (version < 2 ? 2 : 4) > locationBox.dataEnd) break;
+    const itemId = version < 2 ? view.getUint16(offset, false) : view.getUint32(offset, false);
+    offset += version < 2 ? 2 : 4;
+
+    let constructionMethod = 0;
+    if (version === 1 || version === 2) {
+      if (offset + 2 > locationBox.dataEnd) break;
+      constructionMethod = view.getUint16(offset, false) & 0x000f;
+      offset += 2;
+    }
+
+    if (offset + 2 + baseOffsetSize + 2 > locationBox.dataEnd) break;
+    offset += 2;
+    const baseOffset = readVariableUint(view, offset, baseOffsetSize);
+    offset += baseOffsetSize;
+    const extentCount = view.getUint16(offset, false);
+    offset += 2;
+
+    for (let extentIndex = 0; extentIndex < extentCount && offset < locationBox.dataEnd; extentIndex += 1) {
+      const required = indexSize + offsetSize + lengthSize;
+      if (offset + required > locationBox.dataEnd) break;
+      offset += indexSize;
+      const extentOffset = readVariableUint(view, offset, offsetSize);
+      offset += offsetSize;
+      const extentLength = readVariableUint(view, offset, lengthSize);
+      offset += lengthSize;
+
+      if (extentIndex === 0 && constructionMethod === 0 && Number.isFinite(baseOffset) && Number.isFinite(extentOffset) && Number.isFinite(extentLength)) {
+        locations.set(itemId, {
+          offset: baseOffset + extentOffset,
+          length: extentLength,
+        });
+      }
+    }
+  }
+
+  return locations;
+}
+
+function readHeicExifPayload(view, offset, length) {
+  const end = offset + length;
+  if (offset < 0 || length <= 0 || end > view.byteLength) return null;
+
+  if (length >= 4) {
+    const tiffOffset = view.getUint32(offset, false);
+    if (tiffOffset >= 4 && tiffOffset + 8 <= length) {
+      const parsed = readTiff(view, offset + tiffOffset);
+      if (parsed) return parsed;
+    }
+  }
+
+  if (hasExifHeader(view, offset) && offset + 14 <= end) {
+    const parsed = readTiff(view, offset + 6);
+    if (parsed) return parsed;
+  }
+
+  const tiffStart = findTiffHeaderInRange(view, offset, end);
+  return tiffStart === -1 ? null : readTiff(view, tiffStart);
+}
+
+function readHeicBoxes(view, start, end) {
+  const boxes = [];
+  let offset = start;
+
+  while (offset + 8 <= end) {
+    const size = view.getUint32(offset, false);
+    const type = readAscii(view, offset + 4, 4);
+    const boxEnd = size === 0 ? end : offset + size;
+    if (size < 8 || boxEnd > end) break;
+
+    boxes.push({
+      type,
+      start: offset,
+      end: boxEnd,
+      dataStart: offset + 8,
+      dataEnd: boxEnd,
+    });
+
+    if (size === 0) break;
+    offset = boxEnd;
+  }
+
+  return boxes;
+}
+
+function readVariableUint(view, offset, size) {
+  let value = 0;
+  for (let index = 0; index < size; index += 1) {
+    value = value * 256 + view.getUint8(offset + index);
+    if (value > Number.MAX_SAFE_INTEGER) return Number.NaN;
+  }
+  return value;
+}
+
+function readNullTerminatedAscii(view, offset, end) {
+  let result = '';
+  for (let index = offset; index < end; index += 1) {
+    const byte = view.getUint8(index);
+    if (byte === 0) break;
+    result += String.fromCharCode(byte);
+  }
+  return result.trim();
 }
 
 function findEmbeddedXmpPacket(view) {
@@ -454,7 +655,13 @@ function looksLikeHeic(view, fileInfo = {}) {
 }
 
 function findTiffHeader(view) {
-  for (let offset = 0; offset + 4 <= view.byteLength; offset += 1) {
+  return findTiffHeaderInRange(view, 0, view.byteLength);
+}
+
+function findTiffHeaderInRange(view, start, end) {
+  const safeStart = Math.max(0, start);
+  const safeEnd = Math.min(view.byteLength, end);
+  for (let offset = safeStart; offset + 8 <= safeEnd; offset += 1) {
     const little = view.getUint8(offset) === 0x49 &&
       view.getUint8(offset + 1) === 0x49 &&
       view.getUint16(offset + 2, true) === 42;
