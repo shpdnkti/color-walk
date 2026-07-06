@@ -53,14 +53,12 @@ test('extracts PNG compressed international textual creation time and GPS metada
 });
 
 test('extracts PNG XMP creation date and GPS metadata', async () => {
-  const xmp = [
-    '<x:xmpmeta xmlns:x="adobe:ns:meta/">',
-    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
-    '<rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:tiff="http://ns.adobe.com/tiff/1.0/"',
-    ' xmp:CreateDate="2026-10-11T12:13:14+08:00" exif:GPSLatitude="31,13.800000N" exif:GPSLongitude="121,28.368000E" tiff:Model="iPhone 16" />',
-    '</rdf:RDF>',
-    '</x:xmpmeta>',
-  ].join('');
+  const xmp = makeXmpPacket({
+    date: '2026-10-11T12:13:14+08:00',
+    latitude: '31,13.800000N',
+    longitude: '121,28.368000E',
+    camera: 'iPhone 16',
+  });
   const buffer = makePng([
     textChunk('XML:com.adobe.xmp', xmp),
   ]);
@@ -88,10 +86,7 @@ test('extracts PNG eXIf TIFF dates', async () => {
 });
 
 test('extracts HEIC metadata from embedded TIFF payloads', async () => {
-  const prefix = new Uint8Array([
-    0, 0, 0, 24, 102, 116, 121, 112, 104, 101, 105, 99,
-    0, 0, 0, 0, 104, 101, 105, 99, 109, 105, 102, 49,
-  ]);
+  const prefix = makeHeicPrefix();
   const tiff = makeTiffWithDate('2026:07:08 09:10:11');
   const buffer = joinBytes(prefix, new Uint8Array([0, 0, 0, 8, 102, 114, 101, 101]), tiff).buffer;
 
@@ -99,6 +94,27 @@ test('extracts HEIC metadata from embedded TIFF payloads', async () => {
 
   assert.equal(metadata.date, '2026-07-08');
   assert.equal(metadata.displayDate, '2026.07.08');
+});
+
+test('extracts HEIC metadata from embedded XMP packets', async () => {
+  const xmp = makeXmpPacket({
+    date: '2026-11-12T13:14:15+08:00',
+    latitude: '31,13.800000N',
+    longitude: '121,28.368000E',
+    camera: 'iPhone 16 Pro',
+  });
+  const prefix = makeHeicPrefix();
+  const buffer = joinBytes(prefix, ascii(xmp)).buffer;
+
+  const metadata = await extractMetadataFromBuffer(buffer, { type: 'image/heic', name: 'IMG_0002.HEIC' });
+
+  assert.equal(metadata.rawDate, '2026:11:12 13:14:15');
+  assert.equal(metadata.date, '2026-11-12');
+  assert.equal(metadata.displayDate, '2026.11.12');
+  assert.equal(metadata.latitude, 31.23);
+  assert.equal(metadata.longitude, 121.4728);
+  assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
+  assert.equal(metadata.camera, 'iPhone 16 Pro');
 });
 
 test('uses file lastModified as a date fallback when embedded metadata is unavailable', async () => {
@@ -112,6 +128,24 @@ test('uses file lastModified as a date fallback when embedded metadata is unavai
   assert.equal(metadata.displayDate, '2026.05.04');
   assert.equal(metadata.rawDate, 'file:lastModified');
 });
+
+function makeXmpPacket({ date, latitude, longitude, camera }) {
+  return [
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/">',
+    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
+    '<rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:tiff="http://ns.adobe.com/tiff/1.0/"',
+    ' xmp:CreateDate="' + date + '" exif:GPSLatitude="' + latitude + '" exif:GPSLongitude="' + longitude + '" tiff:Model="' + camera + '" />',
+    '</rdf:RDF>',
+    '</x:xmpmeta>',
+  ].join('');
+}
+
+function makeHeicPrefix() {
+  return new Uint8Array([
+    0, 0, 0, 24, 102, 116, 121, 112, 104, 101, 105, 99,
+    0, 0, 0, 0, 104, 101, 105, 99, 109, 105, 102, 49,
+  ]);
+}
 
 function makePng(chunks) {
   return joinBytes(

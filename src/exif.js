@@ -194,7 +194,24 @@ async function parsePngMetadata(view) {
 function parseHeicMetadata(view, fileInfo) {
   if (!looksLikeHeic(view, fileInfo)) return null;
   const tiffStart = findTiffHeader(view);
-  return tiffStart === -1 ? null : readTiff(view, tiffStart);
+  if (tiffStart !== -1) return readTiff(view, tiffStart);
+
+  const xmpPacket = findEmbeddedXmpPacket(view);
+  if (!xmpPacket) return null;
+  const parsed = xmpTextToParsed({ xmp: xmpPacket });
+  return hasParsedMetadata(parsed) ? parsed : null;
+}
+
+function findEmbeddedXmpPacket(view) {
+  const text = decodeUtf8(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+  const start = text.indexOf('<x:xmpmeta') !== -1 ? text.indexOf('<x:xmpmeta') : text.indexOf('<rdf:RDF');
+  if (start === -1) return '';
+
+  const xmpEnd = text.indexOf('</x:xmpmeta>', start);
+  if (xmpEnd !== -1) return text.slice(start, xmpEnd + '</x:xmpmeta>'.length);
+
+  const rdfEnd = text.indexOf('</rdf:RDF>', start);
+  return rdfEnd === -1 ? '' : text.slice(start, rdfEnd + '</rdf:RDF>'.length);
 }
 
 function hasExifHeader(view, offset) {
@@ -326,6 +343,10 @@ function xmpTextToParsed(entries) {
     gpsLongitudeDecimal: firstXmpValue(packet, ['exif:GPSLongitude']),
     camera: firstXmpValue(packet, ['tiff:Model', 'exif:LensModel']),
   };
+}
+
+function hasParsedMetadata(parsed) {
+  return Boolean(parsed?.dateTime || parsed?.dateTimeOriginal || parsed?.gpsLatitudeDecimal || parsed?.gpsLongitudeDecimal || parsed?.camera);
 }
 
 function findXmpPacket(entries) {
