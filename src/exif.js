@@ -118,6 +118,9 @@ function parseCoordinateText(value) {
   const text = String(value || '').trim();
   if (!text) return Number.NaN;
 
+  const rational = parseRationalCoordinateText(text);
+  if (Number.isFinite(rational)) return rational;
+
   const refMatch = text.match(/[NSEW]$/i);
   const ref = refMatch ? refMatch[0].toUpperCase() : '';
   const cleaned = text.replace(/[NSEW]$/i, '').trim();
@@ -134,6 +137,23 @@ function parseCoordinateText(value) {
   const minutes = parts[1] || 0;
   const seconds = parts[2] || 0;
   return sign * (degrees + minutes / 60 + seconds / 3600);
+}
+
+function parseRationalCoordinateText(text) {
+  const matches = Array.from(String(text || '').matchAll(/([+-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g));
+  if (matches.length < 3) return Number.NaN;
+
+  const values = matches.slice(0, 3).map(function (match) {
+    const numerator = Number(match[1]);
+    const denominator = Number(match[2]);
+    return denominator ? numerator / denominator : Number.NaN;
+  });
+  if (values.some(function (part) { return !Number.isFinite(part); })) return Number.NaN;
+
+  const refMatch = String(text).trim().match(/[NSEW]$/i);
+  const ref = refMatch ? refMatch[0].toUpperCase() : '';
+  const sign = String(text).trim().startsWith('-') || ref === 'S' || ref === 'W' ? -1 : 1;
+  return sign * (Math.abs(values[0]) + values[1] / 60 + values[2] / 3600);
 }
 
 async function parseMetadata(buffer, fileInfo = {}) {
@@ -318,10 +338,12 @@ function decodeUtf8(bytes) {
 
 function pngTextToParsed(entries) {
   const xmp = xmpTextToParsed(entries);
-  const dateTime = firstText(entries, ['DateTimeOriginal', 'DateTime', 'Creation Time', 'CreationTime', 'date:create']) || xmp.dateTime;
-  const gpsLatitudeDecimal = firstText(entries, ['GPSLatitude', 'Latitude', 'latitude']) || xmp.gpsLatitudeDecimal;
-  const gpsLongitudeDecimal = firstText(entries, ['GPSLongitude', 'Longitude', 'longitude']) || xmp.gpsLongitudeDecimal;
-  const camera = firstText(entries, ['Model', 'Camera', 'Device']) || xmp.camera;
+  const dateTime = firstText(entries, ['DateTimeOriginal', 'DateTime', 'Creation Time', 'CreationTime', 'date:create', 'exif:DateTimeOriginal', 'exif:DateTimeDigitized', 'exif:DateTime', 'tiff:DateTime']) || xmp.dateTime;
+  const gpsLatitudeText = firstText(entries, ['GPSLatitude', 'Latitude', 'latitude', 'exif:GPSLatitude']);
+  const gpsLongitudeText = firstText(entries, ['GPSLongitude', 'Longitude', 'longitude', 'exif:GPSLongitude']);
+  const gpsLatitudeDecimal = withCoordinateRef(gpsLatitudeText, firstText(entries, ['GPSLatitudeRef', 'exif:GPSLatitudeRef'])) || xmp.gpsLatitudeDecimal;
+  const gpsLongitudeDecimal = withCoordinateRef(gpsLongitudeText, firstText(entries, ['GPSLongitudeRef', 'exif:GPSLongitudeRef'])) || xmp.gpsLongitudeDecimal;
+  const camera = firstText(entries, ['Model', 'Camera', 'Device', 'tiff:Model', 'exif:LensModel']) || xmp.camera;
 
   if (!dateTime && !gpsLatitudeDecimal && !gpsLongitudeDecimal && !camera) return null;
 
@@ -331,6 +353,14 @@ function pngTextToParsed(entries) {
     gpsLongitudeDecimal,
     camera,
   };
+}
+
+function withCoordinateRef(value, ref) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const direction = String(ref || '').trim().charAt(0).toUpperCase();
+  if (!direction || /[NSEW]$/i.test(text)) return text;
+  return text + direction;
 }
 
 function xmpTextToParsed(entries) {

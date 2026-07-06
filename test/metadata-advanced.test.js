@@ -74,6 +74,27 @@ test('extracts PNG XMP creation date and GPS metadata', async () => {
   assert.equal(metadata.camera, 'iPhone 16');
 });
 
+test('extracts PNG namespaced textual EXIF date and rational GPS metadata', async () => {
+  const buffer = makePng([
+    textChunk('exif:DateTimeOriginal', '2026:12:13 14:15:16'),
+    textChunk('exif:GPSLatitudeRef', 'N'),
+    textChunk('exif:GPSLatitude', '31/1,13/1,48/1'),
+    textChunk('exif:GPSLongitudeRef', 'E'),
+    textChunk('exif:GPSLongitude', '121/1,28/1,22/1'),
+    textChunk('tiff:Model', 'Pixel 11'),
+  ]);
+
+  const metadata = await extractMetadataFromBuffer(buffer, { type: 'image/png', name: 'namespaced.png' });
+
+  assert.equal(metadata.rawDate, '2026:12:13 14:15:16');
+  assert.equal(metadata.date, '2026-12-13');
+  assert.equal(metadata.displayDate, '2026.12.13');
+  assert.equal(metadata.latitude, 31.23);
+  assert.equal(metadata.longitude, 121.472778);
+  assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
+  assert.equal(metadata.camera, 'Pixel 11');
+});
+
 test('extracts PNG eXIf TIFF dates', async () => {
   const buffer = makePng([
     chunk('eXIf', makeTiffWithDate('2026:06:07 08:09:10')),
