@@ -36,6 +36,22 @@ test('extracts PNG compressed textual creation time and GPS metadata', async () 
   assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
 });
 
+test('extracts PNG compressed international textual creation time and GPS metadata', async () => {
+  const buffer = makePng([
+    internationalTextChunk('Creation Time', '2026:09:10 11:12:13', { compressed: true }),
+    internationalTextChunk('GPSLatitude', '31.2300', { compressed: true }),
+    internationalTextChunk('GPSLongitude', '121.4728', { compressed: true }),
+  ]);
+
+  const metadata = await extractMetadataFromBuffer(buffer, { type: 'image/png', name: 'international.png' });
+
+  assert.equal(metadata.date, '2026-09-10');
+  assert.equal(metadata.displayDate, '2026.09.10');
+  assert.equal(metadata.latitude, 31.23);
+  assert.equal(metadata.longitude, 121.4728);
+  assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
+});
+
 test('extracts PNG eXIf TIFF dates', async () => {
   const buffer = makePng([
     chunk('eXIf', makeTiffWithDate('2026:06:07 08:09:10')),
@@ -90,6 +106,18 @@ function compressedTextChunk(keyword, value) {
     ascii(keyword + '\0'),
     new Uint8Array([0]),
     deflateSync(Buffer.from(value, 'utf8')),
+  ));
+}
+
+function internationalTextChunk(keyword, value, options = {}) {
+  const compressed = options.compressed === true;
+  const text = Buffer.from(value, 'utf8');
+  return chunk('iTXt', joinBytes(
+    ascii(keyword + '\0'),
+    new Uint8Array([compressed ? 1 : 0, 0]),
+    ascii('zh-CN\0'),
+    ascii('metadata\0'),
+    compressed ? deflateSync(text) : text,
   ));
 }
 

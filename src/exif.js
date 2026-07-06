@@ -159,7 +159,7 @@ async function parsePngMetadata(view) {
     } else if (type === 'zTXt') {
       Object.assign(textEntries, await readPngCompressedTextChunk(view, dataStart, length));
     } else if (type === 'iTXt') {
-      Object.assign(textEntries, readPngInternationalTextChunk(view, dataStart, length));
+      Object.assign(textEntries, await readPngInternationalTextChunk(view, dataStart, length));
     }
 
     offset = dataEnd + 4;
@@ -236,14 +236,27 @@ async function inflateBytes(bytes) {
   return null;
 }
 
-function readPngInternationalTextChunk(view, offset, length) {
+async function readPngInternationalTextChunk(view, offset, length) {
   const bytes = new Uint8Array(view.buffer, view.byteOffset + offset, length);
   const firstNull = bytes.indexOf(0);
-  if (firstNull === -1) return {};
+  if (firstNull === -1 || firstNull + 3 > bytes.length) return {};
+
   const keyword = decodeUtf8(bytes.slice(0, firstNull));
+  const compressionFlag = bytes[firstNull + 1];
+  const compressionMethod = bytes[firstNull + 2];
   const textStart = findInternationalTextValueOffset(bytes, firstNull + 1);
   if (textStart === -1) return {};
-  return { [keyword]: decodeUtf8(bytes.slice(textStart)) };
+
+  let textBytes = bytes.slice(textStart);
+  if (compressionFlag === 1) {
+    if (compressionMethod !== 0) return {};
+    textBytes = await inflateBytes(textBytes);
+    if (!textBytes) return {};
+  } else if (compressionFlag !== 0) {
+    return {};
+  }
+
+  return { [keyword]: decodeUtf8(textBytes) };
 }
 
 function findInternationalTextValueOffset(bytes, offset) {
