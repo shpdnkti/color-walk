@@ -13,20 +13,24 @@
   --panel: rgba(255, 255, 255, 0.96);
   --shadow: 0 22px 54px rgba(15, 23, 42, 0.14);
   --control-radius: 12px;
-  --poster-radius: 20px;
-  --poster-padding: 18px;
-  --poster-title-size: 24px;
+  --image-padding: 0px;
+  --image-radius: 0px;
+  --text-font-size: 24px;
+  --image-scale: 1;
+  --image-translate-x: 0px;
+  --image-translate-y: 0px;
   --movie-color-ratio: 50%;
   --movie-text-color: #ffffff;
   --canvas-ratio: 9 / 16;
   --canvas-zoom: 1;
   --canvas-pan-x: 0px;
   --canvas-pan-y: 0px;
-  font-family: Inter, "SF Pro Text", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
   font-synthesis: none;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
 }
 
 * {
@@ -53,6 +57,7 @@ input,
 textarea,
 select {
   font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
 button,
@@ -293,17 +298,17 @@ p {
 }
 
 .collage-preview {
-  width: auto;
-  height: min(100%, 400px);
+  width: min(100%, 320px);
+  height: auto;
   max-width: min(100%, 320px);
   aspect-ratio: var(--canvas-ratio, 4 / 5);
   align-self: center;
   justify-self: center;
   overflow: hidden;
-  border-radius: var(--poster-radius);
+  border-radius: var(--image-radius);
   background: #ffffff;
   box-shadow: var(--shadow);
-  padding: var(--poster-padding);
+  padding: var(--image-padding);
 }
 
 .preview-inner {
@@ -323,8 +328,10 @@ p {
 
 .preview-image {
   min-height: 0;
+  aspect-ratio: var(--raw-ratio, 1);
+  margin: 0;
   overflow: hidden;
-  border-radius: calc(var(--poster-radius) * 0.5);
+  border-radius: var(--image-radius);
   background: #edf0f3;
   display: grid;
   place-items: center;
@@ -335,11 +342,11 @@ p {
 
 .preview-image img {
   width: 100%;
-  height: 100%;
+  height: auto;
   object-fit: contain;
   display: block;
   background: #0f1720;
-  transform: translate(calc(var(--image-x, 0) * 100%), calc(var(--image-y, 0) * 100%)) scale(var(--image-scale, 1));
+  transform: translate(var(--image-translate-x, 0px), var(--image-translate-y, 0px)) scale(var(--image-scale, 1));
   transform-origin: center center;
   transition: transform 160ms ease;
   will-change: transform;
@@ -401,7 +408,7 @@ p {
 
 .preview-copy h3 {
   margin: 0;
-  font-size: var(--poster-title-size);
+  font-size: var(--text-font-size);
   line-height: 1.16;
   font-weight: 850;
 }
@@ -418,35 +425,40 @@ p {
 
 .font-serif .preview-copy h3,
 .font-serif .movie-title {
-  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-family: Georgia, "Songti SC", "SimSun", serif;
   font-weight: 800;
+  letter-spacing: 0.15em;
 }
 
 .font-hand .preview-copy h3,
-.font-hand .movie-title {
-  font-family: "Kaiti SC", "STKaiti", cursive;
-}
-
+.font-hand .movie-title,
 .font-casual .preview-copy h3,
 .font-casual .movie-title {
-  font-family: "Caveat", "Comic Sans MS", "Kaiti SC", cursive;
-  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  font-weight: 800;
 }
 
 .layout-movie-poster {
-  width: auto;
-  height: min(100%, 540px);
+  width: min(76vw, 304px);
+  height: auto;
   max-width: min(100%, 304px);
   aspect-ratio: var(--canvas-ratio, 9 / 16);
-  padding: var(--poster-padding);
-  border-radius: var(--poster-radius);
+  padding: var(--image-padding);
+  border-radius: var(--image-radius);
   background: #ffffff;
 }
 
 .layout-movie-poster.borderless {
+  --image-padding: 0px;
+  --image-radius: 0px;
   padding: 0;
   border-radius: 0;
   box-shadow: 0 20px 48px rgba(15, 23, 42, 0.13);
+}
+
+.layout-movie-poster.borderless .preview-image {
+  margin: 0;
+  border-radius: 0;
 }
 
 .layout-movie-poster.has-photo {
@@ -463,7 +475,7 @@ p {
   min-height: 0;
   overflow: hidden;
   display: grid;
-  border-radius: var(--poster-radius);
+  border-radius: var(--image-radius);
   background: #ffffff;
 }
 
@@ -491,7 +503,7 @@ p {
 
 .movie-poster-inner.has-photo .movie-photo img {
   width: 100%;
-  height: 100%;
+  height: auto;
   object-fit: contain;
 }
 
@@ -516,7 +528,7 @@ p {
 .movie-title {
   max-width: 92%;
   color: inherit;
-  font-size: var(--poster-title-size);
+  font-size: var(--text-font-size);
   font-weight: 800;
   line-height: 1.12;
   overflow-wrap: anywhere;
@@ -560,8 +572,8 @@ p {
 }
 
 .layout-color-card-poster .preview-inner {
-  padding: var(--poster-padding);
-  border-radius: calc(var(--poster-radius) - 4px);
+  padding: var(--image-padding);
+  border-radius: calc(var(--image-radius) - 4px);
   background: rgba(255, 255, 255, 0.96);
 }
 
@@ -1087,7 +1099,8 @@ select:focus,
   }
 
   .layout-movie-poster {
-    height: min(72vh, 700px);
+    width: min(34vw, 394px);
+    height: auto;
     max-width: min(34vw, 394px);
   }
 
@@ -1099,7 +1112,8 @@ select:focus,
   }
 
   .collage-preview:not(.layout-movie-poster) {
-    height: min(66vh, 620px);
+    width: min(42vw, 520px);
+    height: auto;
     max-width: min(42vw, 520px);
   }
 
