@@ -46,7 +46,7 @@ export async function extractPhotoMetadata(file) {
 
 export async function extractMetadataFromBuffer(buffer, fileInfo = {}) {
   if (!buffer) return metadataWithFallback(null, fileInfo);
-  const parsed = parseMetadata(buffer, fileInfo);
+  const parsed = await parseMetadata(buffer, fileInfo);
   return metadataWithFallback(parsed, fileInfo);
 }
 
@@ -113,9 +113,9 @@ function normalizeDecimalCoordinate(value, limit) {
   return Number(number.toFixed(6));
 }
 
-function parseMetadata(buffer, fileInfo = {}) {
+async function parseMetadata(buffer, fileInfo = {}) {
   const view = buffer instanceof DataView ? buffer : new DataView(buffer);
-  return parseJpegExif(view) || parsePngMetadata(view) || parseHeicMetadata(view, fileInfo) || null;
+  return parseJpegExif(view) || await parsePngMetadata(view) || parseHeicMetadata(view, fileInfo) || null;
 }
 
 function parseJpegExif(view) {
@@ -138,7 +138,7 @@ function parseJpegExif(view) {
   return null;
 }
 
-function parsePngMetadata(view) {
+async function parsePngMetadata(view) {
   if (!hasPngSignature(view)) return null;
 
   let offset = 8;
@@ -156,6 +156,8 @@ function parsePngMetadata(view) {
       exif = readTiff(view, dataStart);
     } else if (type === 'tEXt') {
       Object.assign(textEntries, readPngTextChunk(view, dataStart, length));
+    } else if (type === 'zTXt') {
+      Object.assign(textEntries, await readPngCompressedTextChunk(view, dataStart, length));
     } else if (type === 'iTXt') {
       Object.assign(textEntries, readPngInternationalTextChunk(view, dataStart, length));
     }
@@ -194,6 +196,44 @@ function readPngTextChunk(view, offset, length) {
   const separator = text.indexOf('\0');
   if (separator === -1) return {};
   return { [text.slice(0, separator)]: text.slice(separator + 1) };
+}
+
+async function readPngCompressedTextChunk(view, offset, length) {
+  const bytes = new Uint8Array(view.buffer, view.byteOffset + offset, length);
+  const separator = bytes.indexOf(0);
+  if (separator === -1 || separator + 2 > bytes.length) return {};
+
+  const compressionMethod = bytes[separator + 1];
+  if (compressionMethod !== 0) return {};
+
+  const inflated = await inflateBytes(bytes.slice(separator + 2));
+  if (!inflated) return {};
+
+  return {
+    [decodeUtf8(bytes.slice(0, separator))]: decodeUtf8(inflated),
+  };
+}
+
+async function inflateBytes(bytes) {
+  if (typeof DecompressionStream === 'function' && typeof Blob === 'function' && typeof Response === 'function') {
+    try {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+      // Fall through to the Node test/runtime fallback when available.
+    }
+  }
+
+  if (typeof window === 'undefined') {
+    try {
+      const zlib = await import('node:zlib');
+      return new Uint8Array(zlib.inflateSync(bytes));
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 function readPngInternationalTextChunk(view, offset, length) {

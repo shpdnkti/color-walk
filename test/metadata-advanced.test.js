@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { deflateSync } from 'node:zlib';
 
 import { extractMetadataFromBuffer } from '../src/exif.js';
 
@@ -14,6 +15,22 @@ test('extracts PNG textual creation time and GPS metadata', async () => {
 
   assert.equal(metadata.date, '2026-05-04');
   assert.equal(metadata.displayDate, '2026.05.04');
+  assert.equal(metadata.latitude, 31.23);
+  assert.equal(metadata.longitude, 121.4728);
+  assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
+});
+
+test('extracts PNG compressed textual creation time and GPS metadata', async () => {
+  const buffer = makePng([
+    compressedTextChunk('Creation Time', '2026:08:09 10:11:12'),
+    compressedTextChunk('GPSLatitude', '31.2300'),
+    compressedTextChunk('GPSLongitude', '121.4728'),
+  ]);
+
+  const metadata = await extractMetadataFromBuffer(buffer, { type: 'image/png', name: 'compressed.png' });
+
+  assert.equal(metadata.date, '2026-08-09');
+  assert.equal(metadata.displayDate, '2026.08.09');
   assert.equal(metadata.latitude, 31.23);
   assert.equal(metadata.longitude, 121.4728);
   assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
@@ -66,6 +83,14 @@ function makePng(chunks) {
 
 function textChunk(keyword, value) {
   return chunk('tEXt', ascii(keyword + '\0' + value));
+}
+
+function compressedTextChunk(keyword, value) {
+  return chunk('zTXt', joinBytes(
+    ascii(keyword + '\0'),
+    new Uint8Array([0]),
+    deflateSync(Buffer.from(value, 'utf8')),
+  ));
 }
 
 function chunk(type, data) {
