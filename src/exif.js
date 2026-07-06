@@ -1,23 +1,32 @@
-const TAG_DATE_TIME = 0x0132;
+const TAG_MAKE = 0x010f;
 const TAG_MODEL = 0x0110;
+const TAG_DATE_TIME = 0x0132;
 const TAG_EXIF_IFD = 0x8769;
 const TAG_GPS_IFD = 0x8825;
+const TAG_EXPOSURE_TIME = 0x829a;
+const TAG_F_NUMBER = 0x829d;
+const TAG_ISO_SPEED = 0x8827;
+const TAG_PHOTOGRAPHIC_SENSITIVITY = 0x8833;
 const TAG_DATE_ORIGINAL = 0x9003;
 const TAG_DATE_DIGITIZED = 0x9004;
+const TAG_FOCAL_LENGTH = 0x920a;
 
 export function formatExifDate(value) {
   const match = String(value || '').match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
   if (!match) {
-    return { raw: '', date: '', display: '' };
+    return { raw: '', date: '', display: '', time: '' };
   }
 
   const year = match[1];
   const month = match[2];
   const day = match[3];
+  const hour = match[4];
+  const minute = match[5];
   return {
     raw: value,
     date: year + '-' + month + '-' + day,
     display: year + '.' + month + '.' + day,
+    time: hour + ':' + minute,
   };
 }
 
@@ -33,16 +42,36 @@ export function gpsToDecimal(values, ref = '') {
   return Number((decimal * sign).toFixed(6));
 }
 
+export function formatAperture(value) {
+  const number = rationalToNumber(Array.isArray(value) ? value[0] : value);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  return 'f/' + trimNumber(number, 1);
+}
+
+export function formatShutterSpeed(value) {
+  const number = rationalToNumber(Array.isArray(value) ? value[0] : value);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  if (number >= 1) return trimNumber(number, 1) + 's';
+
+  const denominator = Math.round(1 / number);
+  if (!Number.isFinite(denominator) || denominator <= 0) return '';
+  return '1/' + denominator + 's';
+}
+
+export function formatIso(value) {
+  const number = Array.isArray(value) ? value[0] : value;
+  if (!Number.isFinite(number) || number <= 0) return '';
+  return 'ISO ' + Math.round(number);
+}
+
+export function formatFocalLength(value) {
+  const number = rationalToNumber(Array.isArray(value) ? value[0] : value);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  return trimNumber(number, 1) + 'mm';
+}
+
 export async function extractPhotoMetadata(file) {
-  const empty = {
-    rawDate: '',
-    date: '',
-    displayDate: '',
-    latitude: null,
-    longitude: null,
-    gpsLabel: '',
-    camera: '',
-  };
+  const empty = createEmptyMetadata();
 
   if (!file || typeof file.arrayBuffer !== 'function') return empty;
 
@@ -59,14 +88,36 @@ export async function extractPhotoMetadata(file) {
       rawDate: dateInfo.raw,
       date: dateInfo.date,
       displayDate: dateInfo.display,
+      time: dateInfo.time,
       latitude,
       longitude,
       gpsLabel: latitude !== null && longitude !== null ? latitude.toFixed(4) + ', ' + longitude.toFixed(4) : '',
-      camera: parsed.camera || '',
+      camera: formatCamera(parsed.make, parsed.model),
+      aperture: formatAperture(parsed.aperture),
+      shutter: formatShutterSpeed(parsed.shutter),
+      iso: formatIso(parsed.iso),
+      focalLength: formatFocalLength(parsed.focalLength),
     };
   } catch {
     return empty;
   }
+}
+
+function createEmptyMetadata() {
+  return {
+    rawDate: '',
+    date: '',
+    displayDate: '',
+    time: '',
+    latitude: null,
+    longitude: null,
+    gpsLabel: '',
+    camera: '',
+    aperture: '',
+    shutter: '',
+    iso: '',
+    focalLength: '',
+  };
 }
 
 function parseExif(buffer) {
@@ -114,7 +165,12 @@ function readTiff(view, tiffStart) {
   return {
     dateTime: root[TAG_DATE_TIME],
     dateTimeOriginal: exif[TAG_DATE_ORIGINAL] || exif[TAG_DATE_DIGITIZED],
-    camera: root[TAG_MODEL] || '',
+    make: root[TAG_MAKE] || '',
+    model: root[TAG_MODEL] || '',
+    aperture: exif[TAG_F_NUMBER],
+    shutter: exif[TAG_EXPOSURE_TIME],
+    iso: exif[TAG_PHOTOGRAPHIC_SENSITIVITY] || exif[TAG_ISO_SPEED],
+    focalLength: exif[TAG_FOCAL_LENGTH],
     gpsLatitudeRef: gps[0x0001],
     gpsLatitude: gps[0x0002],
     gpsLongitudeRef: gps[0x0003],
@@ -161,12 +217,13 @@ function readValue(view, tiffStart, valueOffset, type, count, littleEndian) {
   }
 
   if (type === 5) {
-    return Array.from({ length: count }, function (_, index) {
+    const values = Array.from({ length: count }, function (_, index) {
       return {
         numerator: view.getUint32(inlineOffset + index * 8, littleEndian),
         denominator: view.getUint32(inlineOffset + index * 8 + 4, littleEndian),
       };
     });
+    return count === 1 ? values[0] : values;
   }
 
   return null;
@@ -188,4 +245,14 @@ function rationalToNumber(value) {
   if (typeof value === 'number') return value;
   if (!value || !value.denominator) return Number.NaN;
   return value.numerator / value.denominator;
+}
+
+function trimNumber(value, digits) {
+  return Number(value.toFixed(digits)).toString();
+}
+
+function formatCamera(make, model) {
+  const parts = [make, model].map(function (value) { return String(value || '').trim(); }).filter(Boolean);
+  if (parts.length === 2 && parts[1].toLowerCase().startsWith(parts[0].toLowerCase())) return parts[1];
+  return parts.join(' ');
 }

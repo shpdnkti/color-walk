@@ -97,15 +97,21 @@ test('keeps canvas images at natural ratio without fixed image heights', () => {
   assert.doesNotMatch(css, /--poster-radius/);
 });
 
-test('collapses poster spacing and radius through variables when Border-less is active', () => {
-  assert.match(css, /\.layout-movie-poster\.borderless\s*\{[\s\S]*?--image-padding:\s*0px;[\s\S]*?--image-radius:\s*0px;/);
-  assert.match(css, /\.layout-movie-poster\.borderless\s+\.preview-image\s*\{[\s\S]*?margin:\s*0;[\s\S]*?border-radius:\s*0;/);
-  assert.match(appJs, /const resolvedPadding = borderlessMovie \? 0 : state\.style\.padding;/);
-  assert.match(appJs, /const resolvedRadius = borderlessMovie \? 0 : state\.style\.radius;/);
+test('removes movie poster-specific CSS variables and borderless behavior', () => {
+  assert.doesNotMatch(css, /layout-movie-poster/);
+  assert.doesNotMatch(css, /movie-poster-inner/);
+  assert.doesNotMatch(css, /movie-color-card/);
+  assert.doesNotMatch(css, /--movie-card-ratio/);
+  assert.doesNotMatch(css, /--movie-color-ratio/);
+  assert.doesNotMatch(css, /--movie-text-color/);
+  assert.doesNotMatch(appJs, /borderlessMovie/);
+  assert.doesNotMatch(appJs, /borderlessInput/);
 });
 
-test('uses system-safe serif poster typography with expanded tracking', () => {
-  assert.match(css, /\.font-serif\s+\.preview-copy h3,\s*\.font-serif\s+\.movie-title\s*\{[\s\S]*?font-family:\s*Georgia,\s*"Songti SC",\s*"SimSun",\s*serif;[\s\S]*?letter-spacing:\s*0\.15em;/);
+test('uses system-safe fine serif typography for Color Walk overlay text', () => {
+  assert.match(css, /\.font-serif\s+\.color-walk-text-overlay\s*\{[\s\S]*?font-family:\s*Georgia,\s*"Songti SC",\s*"SimSun",\s*serif;/);
+  assert.match(css, /\.color-walk-text-overlay\s*\{[\s\S]*?letter-spacing:\s*0;/);
+  assert.match(css, /\.color-walk-title\s*\{[\s\S]*?font-weight:\s*600;/);
 });
 
 
@@ -115,11 +121,13 @@ test('keeps the visible header brand to Color Walk only', () => {
 });
 
 
-test('exposes updated movie poster controls from design.md', () => {
-  assert.match(html, /id="timeInput"/);
-  assert.match(html, /id="ratioInput"/);
-  assert.match(html, /id="borderlessInput"/);
+test('keeps text controls while removing movie poster controls', () => {
   assert.match(html, />Casual Handwriting</);
+  assert.doesNotMatch(html, /id="ratioInput"/);
+  assert.doesNotMatch(html, /id="borderlessInput"/);
+  assert.doesNotMatch(html, /id="equalRatioButton"/);
+  assert.doesNotMatch(html, />色块比例</);
+  assert.doesNotMatch(html, />边距切换 Border-less</);
 });
 
 test('exposes output ratio segments and resolution feedback in the style panel', () => {
@@ -135,29 +143,23 @@ test('exposes output ratio segments and resolution feedback in the style panel',
 });
 
 
-test('supports fluid movie poster sizing after an image is uploaded', () => {
-  assert.match(css, /\.layout-movie-poster\.has-photo\s*\{[\s\S]*?height:\s*auto;/);
-  assert.match(css, /\.movie-poster-inner\.has-photo\s*\{[\s\S]*?display:\s*flex;/);
-  assert.match(css, /\.movie-poster-inner\.has-photo\s+\.movie-color-card\s*\{[\s\S]*?aspect-ratio:\s*var\(--movie-card-ratio\)/);
-  assert.match(appJs, /--movie-card-ratio/);
-  assert.match(appJs, /fitCanvasToViewport/);
-});
-
-
-test('updates the movie poster color from uploaded image colors by default', () => {
+test('updates the preview accent color from uploaded image colors by default', () => {
   assert.match(appJs, /state\.customColor\s*=\s*getMainColorHex\(\)\s*\|\|\s*state\.customColor/);
 });
 
-test('keeps the movie poster Ratio slider wired to uploaded-photo layout', () => {
-  assert.match(appJs, /function getMovieCardRatio\(\) \{[\s\S]*?return photo\.ratio \* \(imageWeight \/ colorWeight\);/);
-  assert.match(appJs, /function renderPreview\(\) \{[\s\S]*?--movie-card-ratio[\s\S]*?getMovieCardRatio\(\)/);
-  assert.match(appJs, /function applyStyleControls\(\) \{[\s\S]*?--movie-card-ratio[\s\S]*?getMovieCardRatio\(\)/);
-  assert.doesNotMatch(appJs, /colorCard\.style\.setProperty\('--movie-card-ratio'/);
+test('removes movie poster ratio slider and export helpers', () => {
+  assert.doesNotMatch(appJs, /ratioInput/);
+  assert.doesNotMatch(appJs, /equalRatioButton/);
+  assert.doesNotMatch(appJs, /setEqualMovieRatio/);
+  assert.doesNotMatch(appJs, /getMovieCardRatio/);
+  assert.doesNotMatch(appJs, /getMoviePosterExportHeight/);
+  assert.doesNotMatch(appJs, /drawExportMoviePoster/);
 });
 
-test('binds movie poster double-click and direct panning to the canvas viewport', () => {
-  assert.match(appJs, /els\.canvasViewport\.addEventListener\('dblclick'[\s\S]*?toggleMovieColorPosition\(\)/);
-  assert.doesNotMatch(appJs, /els\.previewCanvas\.addEventListener\('dblclick'/);
+test('keeps canvas panning without movie poster double-click behavior', () => {
+  assert.doesNotMatch(appJs, /toggleMovieColorPosition/);
+  assert.doesNotMatch(appJs, /dblclick[\s\S]*?movie/);
+  assert.doesNotMatch(appJs, /movieColorOnTop/);
   assert.match(appJs, /function canStartPan\(event\) \{[\s\S]*?if \(isTypingTarget\(event\.target\)\) return false;[\s\S]*?return true;/);
   assert.match(appJs, /els\.canvasViewport\.classList\.add\('is-pannable'\)/);
 });
@@ -173,32 +175,13 @@ test('binds non-destructive image transform controls inside preview masks', () =
   assert.match(css, /\.preview-image\.is-transforming/);
 });
 
-test('adds an equal-size shortcut for the movie poster Ratio control', () => {
-  assert.match(html, /id="equalRatioButton"/);
-  assert.match(html, />等大<\/button>/);
-  assert.match(css, /\.ratio-control-header\s*\{/);
-  assert.match(css, /\.equal-ratio-button\s*\{/);
-  assert.match(appJs, /equalRatioButton:\s*document\.querySelector\('#equalRatioButton'\)/);
-  assert.match(appJs, /els\.equalRatioButton\.addEventListener\('click'[\s\S]*?setEqualMovieRatio\(\)/);
-  assert.match(appJs, /function setEqualMovieRatio\(\) \{[\s\S]*?els\.ratioInput\.value = '50';[\s\S]*?state\.style\.ratio = 50;[\s\S]*?applyStyleControls\(\)/);
-});
-
 test('keeps the canvas zoom toolbar in the lower-right corner by default', () => {
   assert.match(css, /\.canvas-zoom-toolbar\s*\{[\s\S]*?right:\s*16px;[\s\S]*?bottom:\s*12px;[\s\S]*?transform:\s*none;/);
-});
-
-test('styles the equal-size Ratio shortcut as a compact panel control', () => {
-  assert.match(css, /\.ratio-control-header\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s*auto;/);
-  assert.match(css, /\.equal-ratio-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?border:\s*1px solid var\(--line\);[\s\S]*?background:\s*#ffffff;/);
 });
 
 test('centers the rendered preview after fitting the canvas viewport', () => {
   assert.match(appJs, /function fitCanvasToViewport\(silent\) \{[\s\S]*?requestAnimationFrame\(centerPreviewInViewport\)/);
   assert.match(appJs, /function centerPreviewInViewport\(\) \{[\s\S]*?previewRect\.left \+ previewRect\.width \/ 2[\s\S]*?viewportRect\.left \+ viewportRect\.width \/ 2[\s\S]*?state\.viewport\.panX \+= deltaX;[\s\S]*?state\.viewport\.panY \+= deltaY;/);
-});
-
-test('turns off Border-less when radius or padding sliders add spacing', () => {
-  assert.match(appJs, /if \(\(state\.style\.radius > 0 \|\| state\.style\.padding > 0\) && state\.style\.borderless\) \{[\s\S]*?state\.style\.borderless = false;[\s\S]*?els\.borderlessInput\.checked = false;/);
 });
 
 test('disables canvas transform transitions while fitting before center correction', () => {
@@ -216,8 +199,39 @@ test('places typography controls in the copy panel instead of the style panel', 
   assert.doesNotMatch(stylePanel, /id="fontSelect"/);
 });
 
-test('does not reverse uploaded movie poster color-bottom layout twice', () => {
-  assert.match(appJs, /else inner\.append\(image, colorCard\)/);
-  assert.doesNotMatch(css, /\.movie-poster-inner\.has-photo\.color-bottom\s*\{\s*flex-direction:\s*column-reverse;/);
+
+test('reframes copy editing around one editable cover text field', () => {
+  const copyPanel = html.match(/<section class="panel-page" data-panel="copy"[\s\S]*?<\/section>/)?.[0] || '';
+  assert.match(copyPanel, /id="coverTextInput"/);
+  assert.match(copyPanel, /<textarea[^>]+id="coverTextInput"/);
+  assert.match(copyPanel, />生成封面文字</);
+  assert.doesNotMatch(copyPanel, /id="placeInput"/);
+  assert.doesNotMatch(copyPanel, /id="dateInput"/);
+  assert.doesNotMatch(copyPanel, /id="timeInput"/);
+  assert.doesNotMatch(copyPanel, /id="keywordInput"/);
+  assert.doesNotMatch(copyPanel, /id="copyStyleSelect"/);
+  assert.doesNotMatch(copyPanel, /id="titleInput"/);
+  assert.doesNotMatch(copyPanel, /id="subtitleInput"/);
+  assert.doesNotMatch(copyPanel, /id="placeTagInput"/);
+  assert.doesNotMatch(copyPanel, /id="colorTagsInput"/);
+  assert.doesNotMatch(copyPanel, /id="cornerNoteInput"/);
+  assert.ok(appJs.includes("coverTextInput: document.querySelector('#coverTextInput')"));
+});
+
+
+test('renders one low-volume cover text block in preview and PNG export', () => {
+  assert.match(appJs, /function createColorWalkTextOverlay/);
+  assert.match(appJs, /className = 'color-walk-text-overlay'/);
+  assert.match(appJs, /function drawExportCoverText/);
+  assert.ok(appJs.includes('els.coverTextInput.value'));
+  assert.doesNotMatch(appJs, /els\.colorTagsInput/);
+  assert.match(css, /\.color-walk-text-overlay\s*\{[\s\S]*?white-space:\s*pre-line;/);
+  assert.match(css, /\.color-walk-text-line\s*\{/);
+});
+
+test('does not ship hidden movie poster layout code', () => {
+  assert.doesNotMatch(appJs, /movie-poster/);
+  assert.doesNotMatch(appJs, /renderMoviePoster/);
+  assert.doesNotMatch(css, /movie-/);
 });
 

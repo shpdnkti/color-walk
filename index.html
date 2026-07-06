@@ -22,12 +22,12 @@
       <section id="canvasStage" class="canvas-stage" aria-label="实时画布区">
         <div class="stage-meta" aria-live="polite">
           <span id="photoCount">0 张</span>
-          <span id="layoutHint">电影海报</span>
+          <span id="layoutHint">纯九宫格</span>
         </div>
 
         <div id="canvasViewport" class="canvas-viewport" aria-label="可缩放画布视口">
           <div id="canvasTransform" class="canvas-transform">
-            <div id="previewCanvas" class="poster-card collage-preview layout-movie-poster borderless"></div>
+            <div id="previewCanvas" class="poster-card collage-preview layout-grid9 font-system"></div>
           </div>
         </div>
 
@@ -69,45 +69,15 @@
               </div>
             </section>
 
-            <section class="panel-page" data-panel="copy" aria-label="文案设置">
+            <section class="panel-page" data-panel="copy" aria-label="Color Walk 文字设置">
               <div class="panel-title">
-                <h2>文案编辑</h2>
-                <button id="copyGenerateButton" class="text-button" type="button">生成文案</button>
+                <h2>封面文字</h2>
+                <button id="copyGenerateButton" class="text-button" type="button">生成封面文字</button>
               </div>
               <div class="copy-controls">
-                <div class="field-grid compact-fields">
-                  <label>
-                    地点
-                    <input id="placeInput" type="text" placeholder="武康路 / 校园 / 海边" />
-                  </label>
-                  <label>
-                    日期
-                    <input id="dateInput" type="date" />
-                  </label>
-                  <label>
-                    时间
-                    <input id="timeInput" type="time" />
-                  </label>
-                </div>
                 <label>
-                  风格
-                  <select id="copyStyleSelect"></select>
-                </label>
-                <label>
-                  图片关键词
-                  <input id="keywordInput" type="text" placeholder="花、街角、咖啡、树影" />
-                </label>
-                <label>
-                  Title
-                  <input id="titleInput" type="text" />
-                </label>
-                <label>
-                  Body
-                  <textarea id="bodyInput" rows="4"></textarea>
-                </label>
-                <label>
-                  标签
-                  <input id="tagsInput" type="text" />
+                  文字
+                  <textarea id="coverTextInput" rows="5" placeholder="上传图片后自动生成封面文字，也可以直接手动填写"></textarea>
                 </label>
                 <div class="field-grid typography-fields">
                   <label>
@@ -117,14 +87,14 @@
                   <label>
                     字体
                     <select id="fontSelect">
-                      <option value="system">系统黑体</option>
-                      <option value="serif">优雅衬线</option>
+                      <option value="system" selected>细黑体</option>
+                      <option value="serif">细宋体</option>
                       <option value="hand">手写体</option>
-                      <option value="casual" selected>Casual Handwriting</option>
+                      <option value="casual">Casual Handwriting</option>
                     </select>
                   </label>
                 </div>
-                <button id="copyTextButton" class="floating-copy-button" type="button"><span class="icon icon-copy" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 9h10v10H9z"/><path d="M5 15V5h10"/></svg></span><span>复制文案</span></button>
+                <button id="copyTextButton" class="floating-copy-button" type="button"><span class="icon icon-copy" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 9h10v10H9z"/><path d="M5 15V5h10"/></svg></span><span>复制文字</span></button>
               </div>
             </section>
 
@@ -137,27 +107,16 @@
                 <div class="ratio-presets-control">
                   <div class="ratio-control-header">
                     <span>画布比例</span>
-                    <span id="ratioResolution">9:16 (1080x1920)</span>
+                    <span id="ratioResolution">3:4 (1080x1440)</span>
                   </div>
                   <div id="ratioPresetBar" class="ratio-preset-bar" role="group" aria-label="画布输出比例">
-                    <button class="ratio-preset" type="button" data-ratio="3:4">3:4</button>
+                    <button class="ratio-preset active" type="button" data-ratio="3:4">3:4</button>
                     <button class="ratio-preset" type="button" data-ratio="4:5">4:5</button>
-                    <button class="ratio-preset active" type="button" data-ratio="9:16">9:16</button>
+                    <button class="ratio-preset" type="button" data-ratio="9:16">9:16</button>
                     <button class="ratio-preset" type="button" data-ratio="2:3">2:3</button>
                     <button class="ratio-preset" type="button" data-ratio="1:2">1:2</button>
                   </div>
                 </div>
-                <div class="ratio-control">
-                  <div class="ratio-control-header">
-                    <label for="ratioInput">色块比例</label>
-                    <button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button>
-                  </div>
-                  <input id="ratioInput" type="range" min="35" max="65" value="50" />
-                </div>
-                <label class="toggle-field">
-                  <span>边距切换 Border-less</span>
-                  <input id="borderlessInput" type="checkbox" checked />
-                </label>
                 <label>
                   圆角
                   <input id="radiusInput" type="range" min="0" max="32" value="0" />

@@ -19,8 +19,6 @@
   --image-scale: 1;
   --image-translate-x: 0px;
   --image-translate-y: 0px;
-  --movie-color-ratio: 50%;
-  --movie-text-color: #ffffff;
   --canvas-ratio: 9 / 16;
   --canvas-zoom: 1;
   --canvas-pan-x: 0px;
@@ -316,7 +314,7 @@ p {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 8px;
 }
 
@@ -324,6 +322,99 @@ p {
   min-height: 0;
   display: grid;
   gap: 7px;
+}
+
+.preview-visual {
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--image-radius);
+}
+
+.preview-visual .preview-gallery {
+  width: 100%;
+  height: 100%;
+}
+
+.color-walk-text-overlay {
+  position: absolute;
+  inset: 14px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.94);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  font-size: clamp(10px, calc(var(--text-font-size) * 0.48), 14px);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: left;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.32);
+  white-space: pre-line;
+  pointer-events: none;
+}
+
+.text-lockup {
+  display: grid;
+  gap: 3px;
+}
+
+.color-walk-text-overlay p {
+  margin: 0;
+  max-width: min(100%, 20em);
+  overflow-wrap: anywhere;
+}
+
+.color-walk-text-line {
+  font-size: 0.86em;
+  font-weight: 400;
+  opacity: 0.94;
+}
+
+.color-walk-title {
+  font-size: 1.22em;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.color-walk-subtitle,
+.place-note,
+.color-labels {
+  font-size: 0.86em;
+  font-weight: 400;
+  opacity: 0.94;
+}
+
+.color-labels {
+  margin-top: 3px;
+}
+
+.corner-note {
+  margin-top: auto;
+  font-size: 0.72em;
+  font-weight: 400;
+  opacity: 0.88;
+}
+
+.color-walk-text-overlay.is-center {
+  position: static;
+  inset: auto;
+  width: min(88%, 24em);
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-shadow: none;
+}
+
+.color-walk-text-overlay.is-center p {
+  max-width: 100%;
+}
+
+.color-walk-text-overlay.is-center .corner-note {
+  margin-top: 8px;
 }
 
 .preview-image {
@@ -365,27 +456,6 @@ p {
   transition: none;
 }
 
-.preview-meta {
-  min-height: 28px;
-  border-radius: 10px;
-  background: #f5f5f5;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  color: #55555e;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.preview-meta span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .preview-swatches {
   min-height: 28px;
   display: flex;
@@ -398,149 +468,14 @@ p {
   border-radius: 8px;
 }
 
-.preview-copy {
-  min-width: 0;
-  display: grid;
-  gap: 5px;
-  align-content: end;
-  color: var(--ink);
-}
-
-.preview-copy h3 {
-  margin: 0;
-  font-size: var(--text-font-size);
-  line-height: 1.16;
-  font-weight: 850;
-}
-
-.preview-copy p {
-  color: #62626b;
-  font-size: 11px;
-  line-height: 1.42;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.font-serif .preview-copy h3,
-.font-serif .movie-title {
+.font-serif .color-walk-text-overlay {
   font-family: Georgia, "Songti SC", "SimSun", serif;
-  font-weight: 800;
-  letter-spacing: 0.15em;
 }
 
-.font-hand .preview-copy h3,
-.font-hand .movie-title,
-.font-casual .preview-copy h3,
-.font-casual .movie-title {
+.font-system .color-walk-text-overlay,
+.font-hand .color-walk-text-overlay,
+.font-casual .color-walk-text-overlay {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
-  font-weight: 800;
-}
-
-.layout-movie-poster {
-  width: min(76vw, 304px);
-  height: auto;
-  max-width: min(100%, 304px);
-  aspect-ratio: var(--canvas-ratio, 9 / 16);
-  padding: var(--image-padding);
-  border-radius: var(--image-radius);
-  background: #ffffff;
-}
-
-.layout-movie-poster.borderless {
-  --image-padding: 0px;
-  --image-radius: 0px;
-  padding: 0;
-  border-radius: 0;
-  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.13);
-}
-
-.layout-movie-poster.borderless .preview-image {
-  margin: 0;
-  border-radius: 0;
-}
-
-.layout-movie-poster.has-photo {
-  width: min(76vw, 360px);
-  height: auto;
-  max-width: min(100%, 360px);
-  max-height: none;
-  aspect-ratio: auto;
-}
-
-.movie-poster-inner {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  display: grid;
-  border-radius: var(--image-radius);
-  background: #ffffff;
-}
-
-.borderless .movie-poster-inner {
-  border-radius: 0;
-}
-
-.movie-poster-inner.has-photo {
-  display: flex;
-  flex-direction: column;
-  height: auto;
-}
-
-.movie-poster-inner.has-photo .movie-color-card {
-  width: 100%;
-  aspect-ratio: var(--movie-card-ratio);
-  min-height: 0;
-}
-
-.movie-poster-inner.has-photo .movie-photo {
-  width: 100%;
-  aspect-ratio: var(--raw-ratio, 1);
-  min-height: 0;
-}
-
-.movie-poster-inner.has-photo .movie-photo img {
-  width: 100%;
-  height: auto;
-  object-fit: contain;
-}
-
-.movie-poster-inner.color-top {
-  grid-template-rows: var(--movie-color-ratio) minmax(0, 1fr);
-}
-
-.movie-poster-inner.color-bottom {
-  grid-template-rows: minmax(0, 1fr) var(--movie-color-ratio);
-}
-
-.movie-color-card {
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  background: var(--preview-color, #2a4252);
-  color: var(--movie-text-color, #ffffff);
-  text-align: center;
-}
-
-.movie-title {
-  max-width: 92%;
-  color: inherit;
-  font-size: var(--text-font-size);
-  font-weight: 800;
-  line-height: 1.12;
-  overflow-wrap: anywhere;
-}
-
-.movie-photo {
-  border-radius: 0;
-  background: #111a24;
-}
-
-.movie-photo span {
-  color: #6b7280;
 }
 
 .layout-grid9 .preview-gallery {
@@ -549,7 +484,7 @@ p {
 }
 
 .layout-stacked .preview-inner {
-  grid-template-rows: minmax(0, 1.25fr) auto auto auto;
+  grid-template-rows: minmax(0, 1.25fr) auto;
 }
 
 .layout-stacked .preview-gallery,
@@ -1098,20 +1033,7 @@ select:focus,
     border-radius: 22px;
   }
 
-  .layout-movie-poster {
-    width: min(34vw, 394px);
-    height: auto;
-    max-width: min(34vw, 394px);
-  }
-
-  .layout-movie-poster.has-photo {
-    width: min(34vw, 420px);
-    height: auto;
-    max-width: min(100%, 420px);
-    max-height: none;
-  }
-
-  .collage-preview:not(.layout-movie-poster) {
+  .collage-preview {
     width: min(42vw, 520px);
     height: auto;
     max-width: min(42vw, 520px);

@@ -23,13 +23,6 @@ export const panelDefinitions = [
 
 export const layoutDefinitions = [
   {
-    id: 'movie-poster',
-    label: '电影海报',
-    icon: 'film',
-    description: '纯色字卡与无边距满铺大图上下拼接，适合电影感旅行封面。',
-    className: 'layout-movie-poster',
-  },
-  {
     id: 'grid9',
     label: '纯九宫格',
     icon: 'grid',
@@ -59,84 +52,48 @@ export const layoutDefinitions = [
   },
 ];
 
-export const copyStyleDefinitions = [
-  {
-    id: 'relaxed',
-    label: '松弛',
-    closing: '慢慢走、慢慢看，把照片、色块和心情一起收好。',
-    placeTag: '#城市漫步',
-    fallbackTag: '#色彩记录',
-  },
-  {
-    id: 'dopamine',
-    label: '多巴胺',
-    closing: '这组颜色像把快乐调亮了一格，连日常都变得更鲜活。',
-    placeTag: '#多巴胺穿搭',
-    fallbackTag: '#色彩灵感',
-  },
-  {
-    id: 'city-walk',
-    label: '城市漫步',
-    closing: '城市的色彩线索很轻盈，把照片、色块和心情一起拼成这次 Color Walk。',
-    placeTag: '#城市漫步',
-    fallbackTag: '#色彩记录',
-  },
-  {
-    id: 'healing',
-    label: '情绪疗愈',
-    closing: '这些颜色像一段温柔的缓冲，把今天的情绪慢慢安放下来。',
-    placeTag: '#治愈时刻',
-    fallbackTag: '#情绪色卡',
-  },
-  {
-    id: 'poster-english',
-    label: '英文海报',
-    closing: 'A cinematic Color Walk frame for the mood board. #PosterMood',
-    placeTag: '#PosterMood',
-    fallbackTag: '#PosterMood',
-  },
-];
-
-const styleCopy = Object.fromEntries(
-  copyStyleDefinitions.map((style) => [style.id, style]),
-);
-
-export function generateCopy({
+export function generateCoverText({
+  metadata = {},
+  locationLabel,
   dominantColor,
-  colorName,
-  place,
-  date,
-  time,
-  style = 'city-walk',
+  paletteColors,
 } = {}) {
-  const resolvedColorName = normalizeColorName(colorName) || describeColor(dominantColor);
-  const resolvedPlace = normalizeText(place);
-  const resolvedDate = formatDisplayDate(date);
-  const template = styleCopy[style] || styleCopy['city-walk'];
+  const location = normalizeText(locationLabel || metadata.locationLabel);
+  const title = location ? location + ' color walk' : 'Color Walk';
+  const dateTime = [metadata.displayDate, metadata.time].map(normalizeText).filter(Boolean).join(' ');
+  const note = ['一种很新的记录方式', dateTime].filter(Boolean).join('｜');
+  const cameraLine = [metadata.camera, metadata.aperture, metadata.shutter, metadata.iso, metadata.focalLength]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(' · ');
+  const colorTags = formatColorTags({ paletteColors, dominantColor });
+  const colorLine = '用一种很 color 的方式整理旅行照片：' + colorTags;
 
-  if (style === 'poster-english') {
-    const placeLine = formatPosterPlace(resolvedPlace) || 'Color Walk';
-    const timeLine = formatPosterTime(time);
-    const title = timeLine ? `${placeLine} - ${timeLine}` : placeLine;
-    const body = `${placeLine} in ${describeColor(dominantColor)} tones. ${template.closing}`;
-    return {
-      title,
-      body,
-      tags: ['#ColorWalk', '#PosterMood'],
-    };
-  }
+  return [title, note, cameraLine, colorLine].filter(Boolean).join('\n');
+}
 
-  const title = resolvedPlace
-    ? `${resolvedPlace}的${resolvedColorName} Color Walk`
-    : `一场${resolvedColorName} Color Walk`;
-  const bodyPlace = resolvedPlace || '路过的地方';
-  const bodyDate = resolvedDate || '这一天';
-  const body = `${bodyDate}，在${bodyPlace}收集到一组${resolvedColorName}碎片。${template.closing}`;
-  const tags = resolvedPlace
-    ? ['#ColorWalk', toHashTag(resolvedPlace), toHashTag(resolvedColorName), template.placeTag]
-    : ['#ColorWalk', toHashTag(resolvedColorName), template.fallbackTag];
+function formatColorTags({ paletteColors, dominantColor }) {
+  const defaults = ['蓝色', '橙色', '绿色', '红色'];
+  const colors = Array.isArray(paletteColors) ? paletteColors : [];
+  const names = [];
 
-  return { title, body, tags };
+  colors.forEach(function (hex) {
+    names.push(describeColor(hex));
+  });
+  names.push(describeColor(dominantColor));
+  names.push(...defaults);
+
+  return uniqueNonEmpty(names).slice(0, 4).join(' / ');
+}
+
+function uniqueNonEmpty(values) {
+  const seen = new Set();
+  return values.filter(function (value) {
+    const text = normalizeText(value);
+    if (!text || seen.has(text)) return false;
+    seen.add(text);
+    return true;
+  });
 }
 
 export function describeColor(hex) {
@@ -183,81 +140,14 @@ export function describeColor(hex) {
   return '粉色';
 }
 
-
-function formatPosterPlace(place) {
-  const text = normalizeText(place).replace(/，/g, ',');
-  if (!text) return '';
-
-  return text
-    .split(',')
-    .map((part) => posterPlaceDictionary[part.trim()] || titleCaseAscii(part.trim()))
-    .filter(Boolean)
-    .join(', ');
-}
-
-function formatPosterTime(value) {
-  const text = normalizeText(value);
-  const match = /^(?<hour>\d{1,2})(?::|点)(?<minute>\d{1,2})/.exec(text);
-  if (!match?.groups) return '';
-
-  const hour24 = Number(match.groups.hour);
-  const minute = Number(match.groups.minute);
-  if (!Number.isFinite(hour24) || !Number.isFinite(minute)) return '';
-
-  const suffix = hour24 >= 12 ? 'PM' : 'AM';
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
-}
-
-function titleCaseAscii(value) {
-  return value
-    .replace(/[-_]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/(^|\s)[a-z]/g, (match) => match.toUpperCase());
-}
-
-const posterPlaceDictionary = {
-  '梅里雪山': 'Meili Snow Mountain',
-  '云南': 'Yunnan',
-  '武康路': 'Wukang Road',
-  '校园': 'Campus',
-  '海边': 'Seaside',
-};
-
-function normalizeColorName(colorName) {
-  const text = normalizeText(colorName);
-
-  if (!text) {
-    return '';
-  }
-
-  return text.endsWith('色') ? text : `${text}色`;
-}
-
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function formatDisplayDate(value) {
-  const text = normalizeText(value);
-  const match = /^(?<year>\d{4})-(?<month>\d{1,2})-(?<day>\d{1,2})$/.exec(text);
-
-  if (!match?.groups) {
-    return text;
-  }
-
-  return `${Number(match.groups.month)}月${Number(match.groups.day)}日`;
-}
-
-function toHashTag(value) {
-  return `#${String(value).replace(/\s+/g, '')}`;
 }
 
 function parseHexColor(hex) {
   const text = normalizeText(hex).replace(/^#/, '');
   const fullHex = text.length === 3
-    ? text.split('').map((char) => `${char}${char}`).join('')
+    ? text.split('').map((char) => char + char).join('')
     : text;
 
   if (!/^[\da-f]{6}$/i.test(fullHex)) {

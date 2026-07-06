@@ -2,45 +2,54 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  copyStyleDefinitions,
   describeColor,
-  generateCopy,
+  generateCoverText,
   layoutDefinitions,
   panelDefinitions,
 } from '../src/templates.js';
 
-test('generates title, body, and tags from color, place, date, and style', () => {
-  const copy = generateCopy({
+test('generates a single low-volume cover text from location, EXIF, and colors', () => {
+  const coverText = generateCoverText({
     dominantColor: '#f48fb1',
-    place: '武康路',
-    date: '2026-07-06',
-    style: 'city-walk',
+    paletteColors: ['#f48fb1', '#3498db', '#2ecc71', '#e67e22'],
+    locationLabel: '深圳',
+    metadata: {
+      displayDate: '2026.04.14',
+      time: '09:08',
+      camera: 'Canon EOS R6',
+      aperture: 'f/2.8',
+      shutter: '1/125s',
+      iso: 'ISO 200',
+      focalLength: '35mm',
+    },
   });
 
-  assert.equal(copy.title, '武康路的粉色 Color Walk');
-  assert.match(copy.body, /7月6日/);
-  assert.match(copy.body, /武康路/);
-  assert.match(copy.body, /粉色/);
-  assert.match(copy.body, /城市的色彩线索/);
-  assert.deepEqual(copy.tags, ['#ColorWalk', '#武康路', '#粉色', '#城市漫步']);
+  assert.equal(coverText, [
+    '深圳 color walk',
+    '一种很新的记录方式｜2026.04.14 09:08',
+    'Canon EOS R6 · f/2.8 · 1/125s · ISO 200 · 35mm',
+    '用一种很 color 的方式整理旅行照片：粉色 / 蓝色 / 绿色 / 橙色',
+  ].join('\n'));
 });
 
-test('uses natural fallback copy when place or date is missing', () => {
-  const copy = generateCopy({
+test('omits unavailable EXIF and location details without placeholders', () => {
+  const coverText = generateCoverText({
     dominantColor: '#4caf50',
-    style: 'relaxed',
+    paletteColors: [],
+    metadata: {},
   });
 
-  assert.equal(copy.title, '一场绿色 Color Walk');
-  assert.match(copy.body, /这一天/);
-  assert.match(copy.body, /路过的地方/);
-  assert.match(copy.body, /绿色/);
-  assert.deepEqual(copy.tags, ['#ColorWalk', '#绿色', '#色彩记录']);
+  assert.equal(coverText, [
+    'Color Walk',
+    '一种很新的记录方式',
+    '用一种很 color 的方式整理旅行照片：绿色 / 蓝色 / 橙色 / 红色',
+  ].join('\n'));
+  assert.doesNotMatch(coverText, /undefined|null|NaN/);
 });
 
 test('provides layout definitions with required fields', () => {
   assert.ok(Array.isArray(layoutDefinitions));
-  assert.equal(layoutDefinitions.length, 5);
+  assert.equal(layoutDefinitions.length, 4);
 
   for (const layout of layoutDefinitions) {
     assert.equal(typeof layout.id, 'string');
@@ -55,10 +64,11 @@ test('provides layout definitions with required fields', () => {
 
   assert.deepEqual(
     layoutDefinitions.map((layout) => layout.label),
-    ['电影海报', '纯九宫格', '上下结构', '杂志拼贴', '色卡海报'],
+    ['纯九宫格', '上下结构', '杂志拼贴', '色卡海报'],
   );
 
   assert.ok(layoutDefinitions.every((layout) => typeof layout.icon === 'string' && layout.icon.length > 0));
+  assert.ok(!layoutDefinitions.some((layout) => layout.id === 'movie-poster' || layout.label === '电影海报'));
 });
 
 test('provides bottom editor panel definitions from the design spec', () => {
@@ -73,44 +83,6 @@ test('provides bottom editor panel definitions from the design spec', () => {
   );
 
   assert.ok(panelDefinitions.every((panel) => typeof panel.icon === 'string' && panel.icon.length > 0));
-});
-
-test('provides copy style definitions for the copy panel', () => {
-  assert.deepEqual(
-    copyStyleDefinitions.map((style) => style.id),
-    ['relaxed', 'dopamine', 'city-walk', 'healing', 'poster-english'],
-  );
-
-  assert.deepEqual(
-    copyStyleDefinitions.map((style) => style.label),
-    ['松弛', '多巴胺', '城市漫步', '情绪疗愈', '英文海报'],
-  );
-});
-
-
-test('formats poster copy as single-line English place and time', () => {
-  const copy = generateCopy({
-    dominantColor: '#2a4252',
-    place: '梅里雪山，云南',
-    time: '22:38',
-    style: 'poster-english',
-  });
-
-  assert.equal(copy.title, 'Meili Snow Mountain, Yunnan - 10:38 PM');
-  assert.match(copy.body, /Meili Snow Mountain/);
-  assert.match(copy.body, /#PosterMood/);
-});
-
-
-test('title-cases lowercase poster place text', () => {
-  const copy = generateCopy({
-    dominantColor: '#2a4252',
-    place: 'meili snow mountain, yunnan',
-    time: '22:38',
-    style: 'poster-english',
-  });
-
-  assert.equal(copy.title, 'Meili Snow Mountain, Yunnan - 10:38 PM');
 });
 
 test('falls back to Chinese color names from HEX values', () => {
