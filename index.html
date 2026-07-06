@@ -115,7 +115,7 @@
                 </label>
                 <div class="field-grid typography-fields">
                   <label>
-                    字号
+                    <span class="range-field-header"><span>字号</span><output id="fontSizeValue" class="range-value" for="fontSizeInput">24px</output></span>
                     <input id="fontSizeInput" type="range" min="16" max="30" value="24" />
                   </label>
                   <label>
@@ -154,7 +154,7 @@
                 <div class="ratio-control">
                   <div class="ratio-control-header">
                     <label for="ratioInput">色块比例</label>
-                    <button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button>
+                    <div class="range-header-actions"><output id="ratioValue" class="range-value" for="ratioInput">50%</output><button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button></div>
                   </div>
                   <input id="ratioInput" type="range" min="35" max="65" value="50" />
                 </div>

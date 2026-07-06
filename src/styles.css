@@ -1037,6 +1037,7 @@ label,
   font-weight: 850;
 }
 
+.range-field-header,
 .ratio-control-header {
   min-height: 30px;
   display: grid;
@@ -1045,12 +1046,29 @@ label,
   gap: 10px;
 }
 
+.range-field-header span:first-child,
 .ratio-control-header label {
   display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.range-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-value {
+  min-width: 42px;
+  justify-self: end;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1;
+  text-align: right;
 }
 
 .equal-ratio-button {

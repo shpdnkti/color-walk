@@ -212,6 +212,18 @@ test('adds an equal-size shortcut for the movie poster Ratio control', () => {
   assert.match(appJs, /function setEqualMovieRatio\(\) \{[\s\S]*?els\.ratioInput\.value = '50';[\s\S]*?state\.style\.ratio = 50;[\s\S]*?applyStyleControls\(\)/);
 });
 
+test('shows live numeric values for font size and color ratio sliders', () => {
+  assert.match(html, /id="fontSizeValue"/);
+  assert.match(html, /id="ratioValue"/);
+  assert.match(appJs, /fontSizeValue: document\.querySelector\('#fontSizeValue'\)/);
+  assert.match(appJs, /ratioValue: document\.querySelector\('#ratioValue'\)/);
+  assert.match(appJs, /function syncRangeValueOutputs\(\)/);
+  assert.match(appJs, /els\.fontSizeValue\.textContent = state\.style\.fontSize \+ 'px'/);
+  assert.match(appJs, /els\.ratioValue\.textContent = state\.style\.ratio \+ '%'/);
+  assert.match(appJs, /function setEqualMovieRatio\(\) \{[\s\S]*?syncRangeValueOutputs\(\)/);
+  assert.match(css, /\.range-value/);
+});
+
 test('keeps the canvas zoom toolbar in the lower-right corner by default', () => {
   assert.match(css, /\.canvas-zoom-toolbar\s*\{[\s\S]*?right:\s*16px;[\s\S]*?bottom:\s*12px;[\s\S]*?transform:\s*none;/);
 });

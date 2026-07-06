@@ -101,11 +101,13 @@ const els = {
   radiusInput: document.querySelector('#radiusInput'),
   paddingInput: document.querySelector('#paddingInput'),
   ratioInput: document.querySelector('#ratioInput'),
+  ratioValue: document.querySelector('#ratioValue'),
   ratioPresetBar: document.querySelector('#ratioPresetBar'),
   ratioResolution: document.querySelector('#ratioResolution'),
   equalRatioButton: document.querySelector('#equalRatioButton'),
   borderlessInput: document.querySelector('#borderlessInput'),
   fontSizeInput: document.querySelector('#fontSizeInput'),
+  fontSizeValue: document.querySelector('#fontSizeValue'),
   fontSelect: document.querySelector('#fontSelect'),
   canvasViewport: document.querySelector('#canvasViewport'),
   canvasTransform: document.querySelector('#canvasTransform'),
@@ -222,6 +224,7 @@ function setEqualMovieRatio() {
   els.ratioInput.value = '50';
   state.style.ratio = 50;
   applyStyleControls();
+  syncRangeValueOutputs();
   els.exportStatus.textContent = '已设为上下等大。';
 }
 
@@ -1379,10 +1382,16 @@ function applyStyleControls() {
   setPreviewVar('--text-font-size', state.style.fontSize + 'px');
   setPreviewVar('--movie-color-ratio', state.style.ratio + '%');
   setPreviewVar('--movie-card-ratio', String(getMovieCardRatio()));
+  syncRangeValueOutputs();
   els.previewCanvas.classList.toggle('borderless', borderlessMovie);
   els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
   els.previewCanvas.classList.add('font-' + state.style.font);
   scheduleDraftSave();
+}
+
+function syncRangeValueOutputs() {
+  els.fontSizeValue.textContent = state.style.fontSize + 'px';
+  els.ratioValue.textContent = state.style.ratio + '%';
 }
 
 function getMovieCardRatio() {
