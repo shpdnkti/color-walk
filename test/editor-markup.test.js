@@ -261,3 +261,14 @@ test('wires real AI image recognition controls into the copy workflow', () => {
   assert.ok(appJs.includes('/api/analyze-image'));
   assert.match(appJs, /visionInsight/);
 });
+
+
+test('wires draggable palette swatch ordering into preview and drafts', () => {
+  assert.match(appJs, /paletteOrder/);
+  assert.match(appJs, /draggedColorIndex/);
+  assert.match(appJs, /function movePaletteColor/);
+  assert.match(appJs, /swatch.draggable = true/);
+  assert.match(css, /palette-swatch.is-dragging/);
+  assert.ok(appJs.includes('paletteOrder: state.paletteOrder'));
+  assert.ok(appJs.includes('state.paletteOrder = draft.paletteOrder'));
+});

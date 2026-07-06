@@ -34,6 +34,8 @@ const state = {
   copyDirty: false,
   restoringDraft: false,
   draggedPhotoId: null,
+  draggedColorIndex: null,
+  paletteOrder: [],
   visionInsight: null,
   photoTransforms: new Map(),
   imageGesture: {
@@ -877,19 +879,54 @@ function movePhoto(sourceId, targetId) {
   els.exportStatus.textContent = '图片顺序已更新。';
 }
 
+function movePaletteColor(sourceIndex, targetIndex) {
+  const from = Number(sourceIndex);
+  const to = Number(targetIndex);
+  const colors = getPaletteColors();
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= colors.length || to >= colors.length) return;
+  const moved = colors.splice(from, 1)[0];
+  colors.splice(to, 0, moved);
+  state.paletteOrder = colors.map(normalizeHexColor).filter(Boolean);
+  renderAll();
+  els.exportStatus.textContent = '色块顺序已更新。';
+}
+
 function renderPalette() {
   els.paletteStrip.innerHTML = '';
   const colors = getPaletteColors();
   const summary = buildPaletteSummary(colors);
   els.averageColor.textContent = state.photos.length ? summary.average.hex.toUpperCase() : '等待图片';
 
-  colors.slice(0, 6).forEach(function (hex) {
+  colors.slice(0, 6).forEach(function (hex, index) {
     const swatch = document.createElement('button');
     swatch.type = 'button';
     swatch.className = 'palette-swatch';
+    swatch.draggable = true;
+    swatch.dataset.paletteIndex = String(index);
+    swatch.setAttribute('aria-label', '拖拽调整色块位置，点击应用 ' + hex.toUpperCase());
     swatch.style.background = hex;
     swatch.style.color = getReadableTextColor(hex);
     swatch.innerHTML = '<strong>' + describeColor(hex) + '</strong><span>' + hex.toUpperCase() + '</span>';
+    swatch.addEventListener('dragstart', function (event) {
+      state.draggedColorIndex = index;
+      swatch.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(index));
+    });
+    swatch.addEventListener('dragend', function () {
+      state.draggedColorIndex = null;
+      swatch.classList.remove('is-dragging');
+    });
+    swatch.addEventListener('dragover', function (event) {
+      if (state.draggedColorIndex === null || state.draggedColorIndex === index) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    swatch.addEventListener('drop', function (event) {
+      event.preventDefault();
+      const draggedIndex = event.dataTransfer.getData('text/plain') || state.draggedColorIndex;
+      movePaletteColor(draggedIndex, index);
+    });
     swatch.addEventListener('click', function () {
       state.customColor = hex;
       renderPreview();
@@ -1203,6 +1240,7 @@ function getDraftSnapshot() {
     activePanel: state.activePanel,
     movieColorOnTop: state.movieColorOnTop,
     customColor: state.customColor,
+    paletteOrder: state.paletteOrder,
     visionInsight: state.visionInsight,
     fields: {
       place: els.placeInput.value,
@@ -1241,6 +1279,7 @@ async function restoreDraft() {
     state.activePanel = draft.activePanel;
     state.movieColorOnTop = draft.movieColorOnTop;
     state.customColor = draft.customColor;
+    state.paletteOrder = draft.paletteOrder;
     state.visionInsight = draft.visionInsight;
     state.style = { ...state.style, ...draft.style };
     els.placeInput.value = draft.fields.place;
@@ -1590,7 +1629,28 @@ function getSelectedLayout() {
 }
 
 function getPaletteColors() {
-  return state.photos.length ? state.photos.map(function (photo) { return photo.dominantColor.hex; }) : ['#f05f87', '#6aa9ff', '#82c784', '#f1c84b'];
+  const colors = state.photos.length
+    ? state.photos.map(function (photo) { return photo.dominantColor.hex; })
+    : ['#f05f87', '#6aa9ff', '#82c784', '#f1c84b'];
+  return applyPaletteOrder(colors.map(normalizeHexColor).filter(Boolean));
+}
+
+function applyPaletteOrder(colors) {
+  if (!state.paletteOrder.length) return colors;
+  const remaining = colors.slice();
+  const ordered = [];
+  state.paletteOrder.forEach(function (savedHex) {
+    const hex = normalizeHexColor(savedHex);
+    if (!hex) return;
+    const index = remaining.findIndex(function (item) { return item.toLowerCase() === hex.toLowerCase(); });
+    if (index !== -1) ordered.push(remaining.splice(index, 1)[0]);
+  });
+  return ordered.concat(remaining);
+}
+
+function normalizeHexColor(value) {
+  const hex = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(hex) ? hex.toLowerCase() : '';
 }
 
 function getMainColorHex() {
@@ -1635,6 +1695,7 @@ function resetApp() {
   localStorage.removeItem(DRAFT_STORAGE_KEY);
   state.photos = [];
   state.photoTransforms.clear();
+  state.paletteOrder = [];
   state.imageGesture.activePhotoId = null;
   state.imageGesture.pointerId = null;
   state.imageGesture.pointers.clear();

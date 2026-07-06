@@ -9,6 +9,7 @@ export function serializeDraft(input = {}) {
     activePanel: input.activePanel || 'style',
     movieColorOnTop: input.movieColorOnTop !== false,
     customColor: input.customColor || '#2a4252',
+    paletteOrder: normalizePaletteOrder(input.paletteOrder),
     visionInsight: normalizeVisionInsight(input.visionInsight),
     fields: normalizeFields(input.fields),
     style: normalizeStyle(input.style),
@@ -27,6 +28,7 @@ export function parseDraft(value) {
       activePanel: text(draft.activePanel) || 'style',
       movieColorOnTop: draft.movieColorOnTop !== false,
       customColor: text(draft.customColor) || '#2a4252',
+      paletteOrder: normalizePaletteOrder(draft.paletteOrder),
       visionInsight: normalizeVisionInsight(draft.visionInsight),
       fields: normalizeFields(draft.fields),
       style: normalizeStyle(draft.style),
@@ -72,6 +74,16 @@ function normalizeStyle(style = {}) {
     outputRatio: text(style.outputRatio) || '9:16',
     borderless: style.borderless !== false,
   };
+}
+
+function normalizePaletteOrder(paletteOrder = []) {
+  return Array.isArray(paletteOrder)
+    ? paletteOrder.map(text).filter(isHexColor).slice(0, MAX_DRAFT_PHOTOS)
+    : [];
+}
+
+function isHexColor(value) {
+  return /^#[0-9a-f]{6}$/i.test(value);
 }
 
 function normalizePhotos(photos = []) {

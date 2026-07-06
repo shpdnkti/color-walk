@@ -62,3 +62,11 @@ test('parseDraft rejects invalid payloads without throwing', () => {
   assert.equal(parseDraft('not json'), null);
   assert.equal(parseDraft('{"version":99}'), null);
 });
+
+test('serializes palette swatch order for local draft restore', () => {
+  const draft = parseDraft(serializeDraft({
+    paletteOrder: ['#ffeeaa', ' #123456 ', 'not-a-color', '#abcdef'],
+  }));
+
+  assert.deepEqual(draft.paletteOrder, ['#ffeeaa', '#123456', '#abcdef']);
+});
