@@ -55,8 +55,10 @@ test('provides layout definitions with required fields', () => {
 
   assert.deepEqual(
     layoutDefinitions.map((layout) => layout.label),
-    ['🎬 电影海报', '纯九宫格', '上下结构', '杂志拼贴', '色卡海报'],
+    ['电影海报', '纯九宫格', '上下结构', '杂志拼贴', '色卡海报'],
   );
+
+  assert.ok(layoutDefinitions.every((layout) => typeof layout.icon === 'string' && layout.icon.length > 0));
 });
 
 test('provides bottom editor panel definitions from the design spec', () => {
@@ -67,8 +69,10 @@ test('provides bottom editor panel definitions from the design spec', () => {
 
   assert.deepEqual(
     panelDefinitions.map((panel) => panel.label),
-    ['📐 布局', '🎨 色盘', '✍️ 文案', '⚙️ 样式'],
+    ['布局', '色盘', '文案', '样式'],
   );
+
+  assert.ok(panelDefinitions.every((panel) => typeof panel.icon === 'string' && panel.icon.length > 0));
 });
 
 test('provides copy style definitions for the copy panel', () => {

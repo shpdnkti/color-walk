@@ -9,20 +9,20 @@
   <body>
     <main class="app-shell editor-shell">
       <header class="editor-header" aria-label="编辑器操作栏">
-        <button class="header-button secondary-action" id="resetButton" type="button">🎛️ 重新上传</button>
+        <button class="header-button secondary-action" id="resetButton" type="button"><span class="icon icon-upload" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v10"/><path d="m8 9 4-4 4 4"/><path d="M5 17v2h14v-2"/></svg></span><span>重新上传</span></button>
         <div class="editor-brand" aria-label="Color Walk">
           <h1>Color Walk</h1>
         </div>
         <div class="header-actions">
-          <button class="header-button stash-action" id="stashButton" type="button">💾 暂存</button>
-          <button class="header-button primary-action" id="exportButton" type="button">📤 导出图片</button>
+          <button class="header-button stash-action" id="stashButton" type="button"><span class="icon icon-save" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8"/><path d="M8 17h8"/></svg></span><span>暂存</span></button>
+          <button class="header-button primary-action" id="exportButton" type="button"><span class="icon icon-export" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg></span><span>导出图片</span></button>
         </div>
       </header>
 
       <section id="canvasStage" class="canvas-stage" aria-label="实时画布区">
         <div class="stage-meta" aria-live="polite">
           <span id="photoCount">0 张</span>
-          <span id="layoutHint">🎬 电影海报</span>
+          <span id="layoutHint">电影海报</span>
         </div>
 
         <div id="canvasViewport" class="canvas-viewport" aria-label="可缩放画布视口">
@@ -62,7 +62,7 @@
                 <span id="averageColor">等待图片</span>
               </div>
               <div id="paletteStrip" class="palette-strip"></div>
-              <label id="customColorButton" class="custom-color-button" for="customColorInput">➕ 自定义吸色</label>
+              <label id="customColorButton" class="custom-color-button" for="customColorInput"><span class="icon icon-picker" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m14 5 5 5"/><path d="M13 6l5 5-8 8H5v-5z"/><path d="M5 19h5"/></svg></span><span>自定义吸色</span></label>
               <input id="customColorInput" class="visually-hidden" type="color" value="#2a4252" />
               <div id="photoGrid" class="photo-grid empty-state">
                 <p>上传 1 到 9 张照片后，这里会显示主色调和 EXIF 信息。</p>
@@ -124,7 +124,7 @@
                     </select>
                   </label>
                 </div>
-                <button id="copyTextButton" class="floating-copy-button" type="button">📋 复制文案</button>
+                <button id="copyTextButton" class="floating-copy-button" type="button"><span class="icon icon-copy" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 9h10v10H9z"/><path d="M5 15V5h10"/></svg></span><span>复制文案</span></button>
               </div>
             </section>
 
@@ -134,9 +134,22 @@
                 <span>实时预览</span>
               </div>
               <div class="style-controls">
+                <div class="ratio-presets-control">
+                  <div class="ratio-control-header">
+                    <span>画布比例</span>
+                    <span id="ratioResolution">9:16 (1080x1920)</span>
+                  </div>
+                  <div id="ratioPresetBar" class="ratio-preset-bar" role="group" aria-label="画布输出比例">
+                    <button class="ratio-preset" type="button" data-ratio="3:4">3:4</button>
+                    <button class="ratio-preset" type="button" data-ratio="4:5">4:5</button>
+                    <button class="ratio-preset active" type="button" data-ratio="9:16">9:16</button>
+                    <button class="ratio-preset" type="button" data-ratio="2:3">2:3</button>
+                    <button class="ratio-preset" type="button" data-ratio="1:2">1:2</button>
+                  </div>
+                </div>
                 <div class="ratio-control">
                   <div class="ratio-control-header">
-                    <label for="ratioInput">比例 Ratio</label>
+                    <label for="ratioInput">色块比例</label>
                     <button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button>
                   </div>
                   <input id="ratioInput" type="range" min="35" max="65" value="50" />

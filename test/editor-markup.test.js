@@ -44,10 +44,24 @@ test('stacks desktop control panel sections without stretched grid rows', () => 
 });
 
 test('exposes the required top actions and upload entry point', () => {
-  assert.match(html, />🎛️ 重新上传</);
-  assert.match(html, />💾 暂存</);
-  assert.match(html, />📤 导出图片</);
+  assert.match(html, />重新上传</);
+  assert.match(html, />暂存</);
+  assert.match(html, />导出图片</);
   assert.match(html, /id="fileInput"/);
+});
+
+test('keeps the editor chrome free of colorful emoji labels', () => {
+  const chrome = [html, appJs].join('\n');
+  assert.doesNotMatch(chrome, /[🎛💾📤📐🎨✍️⚙️🎬📋➕🧩]/u);
+  assert.match(html, /class="icon icon-upload"/);
+  assert.match(html, /class="icon icon-save"/);
+  assert.match(html, /class="icon icon-export"/);
+});
+
+test('uses a crisp neutral sans stack for ordinary UI text', () => {
+  assert.match(css, /font-family:\s*Inter,\s*"SF Pro Text",\s*ui-sans-serif,\s*system-ui/);
+  assert.match(css, /font-synthesis:\s*none/);
+  assert.match(css, /text-rendering:\s*geometricPrecision/);
 });
 
 
@@ -62,6 +76,18 @@ test('exposes updated movie poster controls from design.md', () => {
   assert.match(html, /id="ratioInput"/);
   assert.match(html, /id="borderlessInput"/);
   assert.match(html, />Casual Handwriting</);
+});
+
+test('exposes output ratio segments and resolution feedback in the style panel', () => {
+  assert.match(html, /id="ratioPresetBar"/);
+  assert.match(html, /data-ratio="3:4"/);
+  assert.match(html, /data-ratio="4:5"/);
+  assert.match(html, /data-ratio="9:16"/);
+  assert.match(html, /data-ratio="2:3"/);
+  assert.match(html, /data-ratio="1:2"/);
+  assert.match(html, /id="ratioResolution"/);
+  assert.match(appJs, /ratioPresets:/);
+  assert.match(appJs, /function setOutputRatio/);
 });
 
 
@@ -90,6 +116,17 @@ test('binds movie poster double-click and direct panning to the canvas viewport'
   assert.doesNotMatch(appJs, /els\.previewCanvas\.addEventListener\('dblclick'/);
   assert.match(appJs, /function canStartPan\(event\) \{[\s\S]*?if \(isTypingTarget\(event\.target\)\) return false;[\s\S]*?return true;/);
   assert.match(appJs, /els\.canvasViewport\.classList\.add\('is-pannable'\)/);
+});
+
+test('binds non-destructive image transform controls inside preview masks', () => {
+  assert.match(appJs, /photoTransforms:\s*new Map\(\)/);
+  assert.match(appJs, /function bindImageTransformEvents/);
+  assert.match(appJs, /--image-scale/);
+  assert.match(appJs, /--image-x/);
+  assert.match(appJs, /--image-y/);
+  assert.match(appJs, /function drawPhotoContain/);
+  assert.match(css, /\.preview-image img\s*\{[\s\S]*?transform:/);
+  assert.match(css, /\.preview-image\.is-transforming/);
 });
 
 test('adds an equal-size shortcut for the movie poster Ratio control', () => {

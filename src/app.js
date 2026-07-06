@@ -8,6 +8,16 @@ import {
   panelDefinitions,
 } from './templates.js';
 
+const outputRatioConfig = {
+  ratioPresets: [
+    { id: '3:4', width: 1080, height: 1440 },
+    { id: '4:5', width: 1080, height: 1350 },
+    { id: '9:16', width: 1080, height: 1920 },
+    { id: '2:3', width: 1080, height: 1620 },
+    { id: '1:2', width: 1080, height: 2160 },
+  ],
+};
+
 const state = {
   photos: [],
   selectedLayout: 'movie-poster',
@@ -15,6 +25,16 @@ const state = {
   customColor: '#2a4252',
   movieColorOnTop: true,
   copyDirty: false,
+  photoTransforms: new Map(),
+  imageGesture: {
+    activePhotoId: null,
+    pointerId: null,
+    lastX: 0,
+    lastY: 0,
+    pointers: new Map(),
+    pinchStartDistance: 0,
+    pinchStartScale: 1,
+  },
   viewport: {
     zoom: 1,
     panX: 0,
@@ -34,6 +54,7 @@ const state = {
     fontSize: 24,
     font: 'casual',
     ratio: 50,
+    outputRatio: '9:16',
     borderless: true,
   },
 };
@@ -65,6 +86,8 @@ const els = {
   radiusInput: document.querySelector('#radiusInput'),
   paddingInput: document.querySelector('#paddingInput'),
   ratioInput: document.querySelector('#ratioInput'),
+  ratioPresetBar: document.querySelector('#ratioPresetBar'),
+  ratioResolution: document.querySelector('#ratioResolution'),
   equalRatioButton: document.querySelector('#equalRatioButton'),
   borderlessInput: document.querySelector('#borderlessInput'),
   fontSizeInput: document.querySelector('#fontSizeInput'),
@@ -88,6 +111,7 @@ function init() {
   renderPanelTabs();
   renderLayoutControls();
   renderCopyStyleOptions();
+  renderRatioPresets();
   bindEvents();
   applyStyleControls();
   applyCanvasViewport();
@@ -116,6 +140,11 @@ function bindEvents() {
   els.zoomLevelButton.addEventListener('click', function () { resetCanvasViewport(false); });
   els.zoomFitButton.addEventListener('click', function () { fitCanvasToViewport(false); });
   els.equalRatioButton.addEventListener('click', function () { setEqualMovieRatio(); });
+  els.ratioPresetBar.addEventListener('click', function (event) {
+    const button = event.target.closest('button[data-ratio]');
+    if (!button) return;
+    setOutputRatio(button.dataset.ratio);
+  });
   bindCanvasViewportEvents();
 
   [els.placeInput, els.dateInput, els.timeInput, els.keywordInput, els.copyStyleSelect].forEach(function (input) {
@@ -274,7 +303,7 @@ function renderPanelTabs() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'panel-tab';
-    button.textContent = panel.label;
+    button.innerHTML = iconHtml(panel.icon) + '<span>' + escapeHtml(panel.label) + '</span>';
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', String(panel.id === state.activePanel));
     button.addEventListener('click', function () {
@@ -304,6 +333,35 @@ function renderCopyStyleOptions() {
     els.copyStyleSelect.append(option);
   });
   els.copyStyleSelect.value = 'poster-english';
+}
+
+function renderRatioPresets() {
+  els.ratioPresetBar.querySelectorAll('button[data-ratio]').forEach(function (button) {
+    const isActive = button.dataset.ratio === state.style.outputRatio;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
+  applyOutputRatioVars();
+}
+
+function setOutputRatio(id) {
+  if (!outputRatioConfig.ratioPresets.some(function (preset) { return preset.id === id; })) return;
+  state.style.outputRatio = id;
+  renderRatioPresets();
+  renderPreview();
+  els.exportStatus.textContent = '输出比例已切换为 ' + id + '。';
+}
+
+function getSelectedRatioPreset() {
+  return outputRatioConfig.ratioPresets.find(function (preset) {
+    return preset.id === state.style.outputRatio;
+  }) || outputRatioConfig.ratioPresets[2];
+}
+
+function applyOutputRatioVars() {
+  const preset = getSelectedRatioPreset();
+  els.previewCanvas.style.setProperty('--canvas-ratio', preset.width + ' / ' + preset.height);
+  els.ratioResolution.textContent = preset.id + ' (' + preset.width + 'x' + preset.height + ')';
 }
 
 function renderLayoutControls() {
@@ -339,6 +397,20 @@ function getLayoutGlyph(id) {
   return glyphs[id] || glyphs.grid9;
 }
 
+function iconHtml(name) {
+  return '<span class="icon icon-' + escapeHtml(name) + '" aria-hidden="true">' + getIconSvg(name) + '</span>';
+}
+
+function getIconSvg(name) {
+  const icons = {
+    layout: '<svg viewBox="0 0 24 24"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/></svg>',
+    palette: '<svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 0 0 0 16h1.5a1.8 1.8 0 0 0 0-3.6H13a1.4 1.4 0 0 1 0-2.8h1.3A5.7 5.7 0 0 0 20 8.4C18.6 5.8 15.6 4 12 4z"/><path d="M8 10h.01"/><path d="M11 8h.01"/><path d="M8.5 14h.01"/></svg>',
+    copy: '<svg viewBox="0 0 24 24"><path d="M8 6h11v14H8z"/><path d="M5 17V4h11"/></svg>',
+    sliders: '<svg viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M5 12h14"/><path d="M5 17h14"/><path d="M9 5v4"/><path d="M15 10v4"/><path d="M11 15v4"/></svg>',
+  };
+  return icons[name] || icons.layout;
+}
+
 function bindCanvasViewportEvents() {
   els.canvasViewport.addEventListener('dblclick', function (event) {
     event.preventDefault();
@@ -359,7 +431,7 @@ function bindCanvasViewportEvents() {
       state.viewport.pinchStartDistance = getPointerDistance();
       state.viewport.pinchStartZoom = state.viewport.zoom;
       state.viewport.isPanning = false;
-      capturePointer(event.pointerId);
+      capturePointer(els.canvasViewport, event.pointerId);
       return;
     }
 
@@ -369,7 +441,7 @@ function bindCanvasViewportEvents() {
     state.viewport.pointerId = event.pointerId;
     state.viewport.lastX = event.clientX;
     state.viewport.lastY = event.clientY;
-    capturePointer(event.pointerId);
+    capturePointer(els.canvasViewport, event.pointerId);
     applyCanvasViewport();
   });
 
@@ -426,9 +498,9 @@ function bindCanvasViewportEvents() {
   });
 }
 
-function capturePointer(pointerId) {
+function capturePointer(target, pointerId) {
   try {
-    els.canvasViewport.setPointerCapture(pointerId);
+    target.setPointerCapture(pointerId);
   } catch (error) {
     // Synthetic test events do not create an active browser pointer; real gestures do.
   }
@@ -548,6 +620,7 @@ function renderPhotos() {
     remove.textContent = '×';
     remove.addEventListener('click', function () {
       URL.revokeObjectURL(photo.src);
+      state.photoTransforms.delete(photo.id);
       state.photos = state.photos.filter(function (item) { return item.id !== photo.id; });
       state.copyDirty = false;
       seedCopy();
@@ -588,6 +661,7 @@ function renderPreview() {
   const hasMoviePhoto = state.selectedLayout === 'movie-poster' && Boolean(state.photos[0]);
   els.layoutHint.textContent = layout.label;
   els.previewCanvas.className = 'collage-preview ' + layout.className + ' font-' + state.style.font + (isBorderless ? ' borderless' : '') + (hasMoviePhoto ? ' has-photo' : '');
+  applyOutputRatioVars();
   els.previewCanvas.style.setProperty('--preview-color', previewColor);
   els.previewCanvas.style.setProperty('--movie-text-color', getReadableTextColor(previewColor));
   els.previewCanvas.style.setProperty('--movie-color-ratio', state.style.ratio + '%');
@@ -657,20 +731,9 @@ function renderMoviePoster(inner) {
 
 
 function createPreviewImage() {
-  const photo = state.photos[0];
   const imageWrap = document.createElement('div');
   imageWrap.className = 'preview-image';
-  if (photo) {
-    imageWrap.style.setProperty('--raw-ratio', String(photo.ratio));
-    imageWrap.dataset.rawRatio = String(photo.ratio);
-    const img = document.createElement('img');
-    img.src = photo.src;
-    img.alt = photo.fileName;
-    img.style.aspectRatio = photo.naturalWidth + ' / ' + photo.naturalHeight;
-    imageWrap.append(img);
-  } else {
-    imageWrap.innerHTML = '<span>上传图片</span>';
-  }
+  hydratePreviewImage(imageWrap, state.photos[0]);
   return imageWrap;
 }
 
@@ -682,30 +745,169 @@ function createPreviewGallery(slots) {
     const photo = state.photos[index % Math.max(state.photos.length, 1)];
     const imageWrap = document.createElement('div');
     imageWrap.className = 'preview-image';
-    if (photo) {
-      imageWrap.style.setProperty('--raw-ratio', String(photo.ratio));
-      imageWrap.dataset.rawRatio = String(photo.ratio);
-      const img = document.createElement('img');
-      img.src = photo.src;
-      img.alt = photo.fileName;
-      img.style.aspectRatio = photo.naturalWidth + ' / ' + photo.naturalHeight;
-      imageWrap.append(img);
-    } else {
-      imageWrap.innerHTML = '<span>上传图片</span>';
-    }
+    hydratePreviewImage(imageWrap, photo);
     gallery.append(imageWrap);
   }
 
   return gallery;
 }
 
+function hydratePreviewImage(imageWrap, photo) {
+  if (!photo) {
+    imageWrap.innerHTML = '<span>上传图片</span>';
+    return;
+  }
+
+  imageWrap.classList.add('has-photo');
+  imageWrap.style.setProperty('--raw-ratio', String(photo.ratio));
+  imageWrap.dataset.rawRatio = String(photo.ratio);
+  imageWrap.dataset.photoId = photo.id;
+  applyPhotoTransformToElement(imageWrap, photo.id);
+
+  const img = document.createElement('img');
+  img.src = photo.src;
+  img.alt = photo.fileName;
+  img.style.aspectRatio = photo.naturalWidth + ' / ' + photo.naturalHeight;
+  imageWrap.append(img);
+  bindImageTransformEvents(imageWrap, photo);
+}
+
+function bindImageTransformEvents(imageWrap, photo) {
+  imageWrap.addEventListener('wheel', function (event) {
+    if (event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const transform = getPhotoTransform(photo.id);
+    const delta = event.deltaY > 0 ? -0.08 : 0.08;
+    setPhotoTransform(photo.id, {
+      scale: transform.scale + delta,
+      x: transform.x,
+      y: transform.y,
+    });
+    applyPhotoTransformToElement(imageWrap, photo.id);
+    els.exportStatus.textContent = '图片焦点缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+  }, { passive: false });
+
+  imageWrap.addEventListener('pointerdown', function (event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.imageGesture.activePhotoId = photo.id;
+    state.imageGesture.pointerId = event.pointerId;
+    state.imageGesture.lastX = event.clientX;
+    state.imageGesture.lastY = event.clientY;
+    state.imageGesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (state.imageGesture.pointers.size === 2) updateImagePinchStart(photo.id);
+    imageWrap.classList.add('is-transforming');
+    capturePointer(imageWrap, event.pointerId);
+  });
+
+  imageWrap.addEventListener('pointermove', function (event) {
+    if (state.imageGesture.activePhotoId !== photo.id || !state.imageGesture.pointers.has(event.pointerId)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.imageGesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (state.imageGesture.pointers.size >= 2 && state.imageGesture.pinchStartDistance > 0) {
+      const distance = getImagePointerDistance();
+      const transform = getPhotoTransform(photo.id);
+      setPhotoTransform(photo.id, {
+        scale: state.imageGesture.pinchStartScale * (distance / state.imageGesture.pinchStartDistance),
+        x: transform.x,
+        y: transform.y,
+      });
+      applyPhotoTransformToElement(imageWrap, photo.id);
+      return;
+    }
+
+    if (state.imageGesture.pointerId !== event.pointerId) return;
+    const width = Math.max(1, imageWrap.clientWidth);
+    const height = Math.max(1, imageWrap.clientHeight);
+    const dx = (event.clientX - state.imageGesture.lastX) / width;
+    const dy = (event.clientY - state.imageGesture.lastY) / height;
+    const transform = getPhotoTransform(photo.id);
+    setPhotoTransform(photo.id, {
+      scale: transform.scale,
+      x: transform.x + dx,
+      y: transform.y + dy,
+    });
+    state.imageGesture.lastX = event.clientX;
+    state.imageGesture.lastY = event.clientY;
+    applyPhotoTransformToElement(imageWrap, photo.id);
+  });
+
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (eventName) {
+    imageWrap.addEventListener(eventName, function (event) {
+      if (state.imageGesture.activePhotoId !== photo.id) return;
+      event.stopPropagation();
+      state.imageGesture.pointers.delete(event.pointerId);
+      if (state.imageGesture.pointers.size === 0) {
+        state.imageGesture.activePhotoId = null;
+        state.imageGesture.pointerId = null;
+        state.imageGesture.pinchStartDistance = 0;
+        imageWrap.classList.remove('is-transforming');
+        return;
+      }
+
+      const nextPointer = state.imageGesture.pointers.values().next().value;
+      state.imageGesture.pointerId = Array.from(state.imageGesture.pointers.keys())[0];
+      state.imageGesture.lastX = nextPointer.x;
+      state.imageGesture.lastY = nextPointer.y;
+      if (state.imageGesture.pointers.size === 1) state.imageGesture.pinchStartDistance = 0;
+      else updateImagePinchStart(photo.id);
+    });
+  });
+}
+
+function updateImagePinchStart(photoId) {
+  state.imageGesture.pinchStartDistance = getImagePointerDistance();
+  state.imageGesture.pinchStartScale = getPhotoTransform(photoId).scale;
+}
+
+function getImagePointerDistance() {
+  const points = Array.from(state.imageGesture.pointers.values());
+  if (points.length < 2) return 0;
+  const dx = points[0].x - points[1].x;
+  const dy = points[0].y - points[1].y;
+  return Math.hypot(dx, dy);
+}
+
+function getPhotoTransform(photoId) {
+  return state.photoTransforms.get(photoId) || { scale: 1, x: 0, y: 0 };
+}
+
+function setPhotoTransform(photoId, transform) {
+  state.photoTransforms.set(photoId, clampPhotoTransform(transform));
+}
+
+function applyPhotoTransformToElement(element, photoId) {
+  const transform = getPhotoTransform(photoId);
+  element.style.setProperty('--image-scale', transform.scale.toFixed(3));
+  element.style.setProperty('--image-x', transform.x.toFixed(4));
+  element.style.setProperty('--image-y', transform.y.toFixed(4));
+}
+
+function clampPhotoTransform(transform) {
+  const scale = clamp(transform.scale || 1, 1, 4);
+  const maxOffset = scale <= 1 ? 0 : Math.min(0.48, (scale - 1) / (scale * 2) + 0.08);
+  return {
+    scale,
+    x: scale <= 1 ? 0 : clamp(transform.x || 0, -maxOffset, maxOffset),
+    y: scale <= 1 ? 0 : clamp(transform.y || 0, -maxOffset, maxOffset),
+  };
+}
+
 function applyStyleControls() {
+  applyOutputRatioVars();
+  const borderlessMovie = state.selectedLayout === 'movie-poster' && state.style.borderless;
+  els.radiusInput.disabled = borderlessMovie;
+  els.paddingInput.disabled = borderlessMovie;
   els.previewCanvas.style.setProperty('--poster-radius', state.style.radius + 'px');
   els.previewCanvas.style.setProperty('--poster-padding', state.style.padding + 'px');
   els.previewCanvas.style.setProperty('--poster-title-size', state.style.fontSize + 'px');
   els.previewCanvas.style.setProperty('--movie-color-ratio', state.style.ratio + '%');
   els.previewCanvas.style.setProperty('--movie-card-ratio', String(getMovieCardRatio()));
-  els.previewCanvas.classList.toggle('borderless', state.selectedLayout === 'movie-poster' && state.style.borderless);
+  els.previewCanvas.classList.toggle('borderless', borderlessMovie);
   els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
   els.previewCanvas.classList.add('font-' + state.style.font);
 }
@@ -757,7 +959,7 @@ async function exportPng() {
   els.exportStatus.textContent = '正在生成 PNG...';
   const canvas = els.exportCanvas;
   canvas.width = 1080;
-  canvas.height = state.selectedLayout === 'movie-poster' ? getMoviePosterExportHeight(1080) : 1350;
+  canvas.height = state.selectedLayout === 'movie-poster' ? getMoviePosterExportHeight(1080) : getOutputExportHeight(1080);
   const ctx = canvas.getContext('2d');
   drawExport(ctx, canvas.width, canvas.height);
 
@@ -778,12 +980,17 @@ async function exportPng() {
 
 function getMoviePosterExportHeight(width) {
   const photo = state.photos[0];
-  if (!photo) return 1920;
+  if (!photo) return getOutputExportHeight(width);
   const margin = state.style.borderless ? 0 : 72;
   const posterW = width - margin * 2;
   const imageH = posterW / photo.ratio;
   const colorH = imageH * (state.style.ratio / (100 - state.style.ratio));
   return Math.ceil(imageH + colorH + margin * 2);
+}
+
+function getOutputExportHeight(width) {
+  const preset = getSelectedRatioPreset();
+  return Math.round(width * (preset.height / preset.width));
 }
 
 function drawExport(ctx, width, height) {
@@ -830,7 +1037,7 @@ function drawExportMoviePoster(ctx, width, height, mainColor) {
   ctx.fillRect(posterX, colorY, posterW, colorH);
 
   ctx.save();
-  if (photo) drawImageContain(ctx, photo.image, posterX, imageY, posterW, imageH, '#111a24');
+  if (photo) drawPhotoContain(ctx, photo, posterX, imageY, posterW, imageH, '#111a24');
   else {
     ctx.fillStyle = '#f3f4f6';
     ctx.fillRect(posterX, imageY, posterW, imageH);
@@ -898,7 +1105,7 @@ function drawImageGrid(ctx, x, y, w, h, columns, gap) {
     const py = y + row * (cellH + gap);
     ctx.save();
     roundedClip(ctx, px, py, cellW, cellH, 24);
-    drawImageContain(ctx, photo.image, px, py, cellW, cellH, '#f3f4f6');
+    drawPhotoContain(ctx, photo, px, py, cellW, cellH, '#f3f4f6');
     ctx.restore();
     ctx.fillStyle = photo.dominantColor.hex;
     ctx.fillRect(px, py + cellH - 18, cellW, 18);
@@ -979,14 +1186,19 @@ function drawImageCover(ctx, image, x, y, w, h) {
   ctx.drawImage(image, sx, sy, sw, sh, x, y, w, h);
 }
 
-function drawImageContain(ctx, image, x, y, w, h, background) {
+function drawPhotoContain(ctx, photo, x, y, w, h, background) {
+  drawImageContain(ctx, photo.image, x, y, w, h, background, getPhotoTransform(photo.id));
+}
+
+function drawImageContain(ctx, image, x, y, w, h, background, transform) {
+  const photoTransform = transform || { scale: 1, x: 0, y: 0 };
   ctx.fillStyle = background || '#f3f4f6';
   ctx.fillRect(x, y, w, h);
-  const scale = Math.min(w / image.naturalWidth, h / image.naturalHeight);
+  const scale = Math.min(w / image.naturalWidth, h / image.naturalHeight) * photoTransform.scale;
   const dw = image.naturalWidth * scale;
   const dh = image.naturalHeight * scale;
-  const dx = x + (w - dw) / 2;
-  const dy = y + (h - dh) / 2;
+  const dx = x + (w - dw) / 2 + photoTransform.x * w;
+  const dy = y + (h - dh) / 2 + photoTransform.y * h;
   ctx.drawImage(image, dx, dy, dw, dh);
 }
 
@@ -1029,9 +1241,15 @@ function handleResetUpload() {
 function resetApp() {
   state.photos.forEach(function (photo) { URL.revokeObjectURL(photo.src); });
   state.photos = [];
+  state.photoTransforms.clear();
+  state.imageGesture.activePhotoId = null;
+  state.imageGesture.pointerId = null;
+  state.imageGesture.pointers.clear();
+  state.imageGesture.pinchStartDistance = 0;
   state.copyDirty = false;
   state.customColor = '#2a4252';
   state.movieColorOnTop = true;
+  state.style.outputRatio = '9:16';
   state.viewport.zoom = 1;
   state.viewport.panX = 0;
   state.viewport.panY = 0;
@@ -1045,6 +1263,7 @@ function resetApp() {
   els.timeInput.value = '';
   renderPanelTabs();
   renderLayoutControls();
+  renderRatioPresets();
   applyCanvasViewport();
   seedCopy(true);
   renderAll();
