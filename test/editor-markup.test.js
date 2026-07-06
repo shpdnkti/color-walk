@@ -59,9 +59,53 @@ test('keeps the editor chrome free of colorful emoji labels', () => {
 });
 
 test('uses a crisp neutral sans stack for ordinary UI text', () => {
-  assert.match(css, /font-family:\s*Inter,\s*"SF Pro Text",\s*ui-sans-serif,\s*system-ui/);
+  assert.match(css, /font-family:\s*-apple-system,\s*BlinkMacSystemFont,\s*"Segoe UI",\s*Roboto,\s*"PingFang SC",\s*sans-serif;/);
   assert.match(css, /font-synthesis:\s*none/);
   assert.match(css, /text-rendering:\s*geometricPrecision/);
+  assert.match(css, /font-variant-numeric:\s*tabular-nums;/);
+});
+
+test('defines the required global canvas CSS variable contract', () => {
+  assert.match(css, /:root\s*\{[\s\S]*?--canvas-ratio:\s*9\s*\/\s*16;/);
+  assert.match(css, /:root\s*\{[\s\S]*?--image-padding:\s*0px;/);
+  assert.match(css, /:root\s*\{[\s\S]*?--image-radius:\s*0px;/);
+  assert.match(css, /:root\s*\{[\s\S]*?--text-font-size:\s*24px;/);
+  assert.match(css, /:root\s*\{[\s\S]*?--image-scale:\s*1;/);
+  assert.match(css, /:root\s*\{[\s\S]*?--image-translate-x:\s*0px;/);
+  assert.match(css, /:root\s*\{[\s\S]*?--image-translate-y:\s*0px;/);
+});
+
+test('drives preview style from the required CSS variable names', () => {
+  assert.match(appJs, /setPreviewVar\('--canvas-ratio'/);
+  assert.match(appJs, /setPreviewVar\('--image-padding'/);
+  assert.match(appJs, /setPreviewVar\('--image-radius'/);
+  assert.match(appJs, /setPreviewVar\('--text-font-size'/);
+  assert.match(appJs, /--image-translate-x/);
+  assert.match(appJs, /--image-translate-y/);
+  assert.doesNotMatch(appJs, /--poster-padding/);
+  assert.doesNotMatch(appJs, /--poster-radius/);
+  assert.doesNotMatch(appJs, /--poster-title-size/);
+  assert.doesNotMatch(appJs, /--image-x/);
+  assert.doesNotMatch(appJs, /--image-y/);
+});
+
+test('keeps canvas images at natural ratio without fixed image heights', () => {
+  assert.match(css, /\.preview-image\s*\{[\s\S]*?aspect-ratio:\s*var\(--raw-ratio,\s*1\);/);
+  assert.match(css, /\.preview-image img\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*auto;[\s\S]*?object-fit:\s*contain;/);
+  assert.doesNotMatch(css, /\.layout-movie-poster\s*\{[\s\S]*?height:\s*min\(/);
+  assert.doesNotMatch(css, /--poster-padding/);
+  assert.doesNotMatch(css, /--poster-radius/);
+});
+
+test('collapses poster spacing and radius through variables when Border-less is active', () => {
+  assert.match(css, /\.layout-movie-poster\.borderless\s*\{[\s\S]*?--image-padding:\s*0px;[\s\S]*?--image-radius:\s*0px;/);
+  assert.match(css, /\.layout-movie-poster\.borderless\s+\.preview-image\s*\{[\s\S]*?margin:\s*0;[\s\S]*?border-radius:\s*0;/);
+  assert.match(appJs, /const resolvedPadding = borderlessMovie \? 0 : state\.style\.padding;/);
+  assert.match(appJs, /const resolvedRadius = borderlessMovie \? 0 : state\.style\.radius;/);
+});
+
+test('uses system-safe serif poster typography with expanded tracking', () => {
+  assert.match(css, /\.font-serif\s+\.preview-copy h3,\s*\.font-serif\s+\.movie-title\s*\{[\s\S]*?font-family:\s*Georgia,\s*"Songti SC",\s*"SimSun",\s*serif;[\s\S]*?letter-spacing:\s*0\.15em;/);
 });
 
 
@@ -122,8 +166,8 @@ test('binds non-destructive image transform controls inside preview masks', () =
   assert.match(appJs, /photoTransforms:\s*new Map\(\)/);
   assert.match(appJs, /function bindImageTransformEvents/);
   assert.match(appJs, /--image-scale/);
-  assert.match(appJs, /--image-x/);
-  assert.match(appJs, /--image-y/);
+  assert.match(appJs, /--image-translate-x/);
+  assert.match(appJs, /--image-translate-y/);
   assert.match(appJs, /function drawPhotoContain/);
   assert.match(css, /\.preview-image img\s*\{[\s\S]*?transform:/);
   assert.match(css, /\.preview-image\.is-transforming/);

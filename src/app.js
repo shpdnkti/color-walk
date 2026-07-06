@@ -360,8 +360,12 @@ function getSelectedRatioPreset() {
 
 function applyOutputRatioVars() {
   const preset = getSelectedRatioPreset();
-  els.previewCanvas.style.setProperty('--canvas-ratio', preset.width + ' / ' + preset.height);
+  setPreviewVar('--canvas-ratio', preset.width + ' / ' + preset.height);
   els.ratioResolution.textContent = preset.id + ' (' + preset.width + 'x' + preset.height + ')';
+}
+
+function setPreviewVar(name, value) {
+  document.documentElement.style.setProperty(name, value);
 }
 
 function renderLayoutControls() {
@@ -660,15 +664,17 @@ function renderPreview() {
   const isBorderless = state.selectedLayout === 'movie-poster' && state.style.borderless;
   const hasMoviePhoto = state.selectedLayout === 'movie-poster' && Boolean(state.photos[0]);
   els.layoutHint.textContent = layout.label;
-  els.previewCanvas.className = 'collage-preview ' + layout.className + ' font-' + state.style.font + (isBorderless ? ' borderless' : '') + (hasMoviePhoto ? ' has-photo' : '');
+  els.previewCanvas.className = 'poster-card collage-preview ' + layout.className + ' font-' + state.style.font + (isBorderless ? ' borderless' : '') + (hasMoviePhoto ? ' has-photo' : '');
   applyOutputRatioVars();
-  els.previewCanvas.style.setProperty('--preview-color', previewColor);
-  els.previewCanvas.style.setProperty('--movie-text-color', getReadableTextColor(previewColor));
-  els.previewCanvas.style.setProperty('--movie-color-ratio', state.style.ratio + '%');
-  els.previewCanvas.style.setProperty('--poster-radius', state.style.radius + 'px');
-  els.previewCanvas.style.setProperty('--poster-padding', state.style.padding + 'px');
-  els.previewCanvas.style.setProperty('--poster-title-size', state.style.fontSize + 'px');
-  els.previewCanvas.style.setProperty('--movie-card-ratio', String(getMovieCardRatio()));
+  const resolvedPadding = isBorderless ? 0 : state.style.padding;
+  const resolvedRadius = isBorderless ? 0 : state.style.radius;
+  setPreviewVar('--preview-color', previewColor);
+  setPreviewVar('--movie-text-color', getReadableTextColor(previewColor));
+  setPreviewVar('--movie-color-ratio', state.style.ratio + '%');
+  setPreviewVar('--image-radius', resolvedRadius + 'px');
+  setPreviewVar('--image-padding', resolvedPadding + 'px');
+  setPreviewVar('--text-font-size', state.style.fontSize + 'px');
+  setPreviewVar('--movie-card-ratio', String(getMovieCardRatio()));
   els.previewCanvas.innerHTML = '';
 
   const inner = document.createElement('div');
@@ -770,6 +776,9 @@ function hydratePreviewImage(imageWrap, photo) {
   img.style.aspectRatio = photo.naturalWidth + ' / ' + photo.naturalHeight;
   imageWrap.append(img);
   bindImageTransformEvents(imageWrap, photo);
+  requestAnimationFrame(function () {
+    applyPhotoTransformToElement(imageWrap, photo.id);
+  });
 }
 
 function bindImageTransformEvents(imageWrap, photo) {
@@ -882,9 +891,11 @@ function setPhotoTransform(photoId, transform) {
 
 function applyPhotoTransformToElement(element, photoId) {
   const transform = getPhotoTransform(photoId);
+  const offsetX = Math.round(transform.x * Math.max(1, element.clientWidth));
+  const offsetY = Math.round(transform.y * Math.max(1, element.clientHeight));
   element.style.setProperty('--image-scale', transform.scale.toFixed(3));
-  element.style.setProperty('--image-x', transform.x.toFixed(4));
-  element.style.setProperty('--image-y', transform.y.toFixed(4));
+  element.style.setProperty('--image-translate-x', offsetX + 'px');
+  element.style.setProperty('--image-translate-y', offsetY + 'px');
 }
 
 function clampPhotoTransform(transform) {
@@ -902,11 +913,13 @@ function applyStyleControls() {
   const borderlessMovie = state.selectedLayout === 'movie-poster' && state.style.borderless;
   els.radiusInput.disabled = borderlessMovie;
   els.paddingInput.disabled = borderlessMovie;
-  els.previewCanvas.style.setProperty('--poster-radius', state.style.radius + 'px');
-  els.previewCanvas.style.setProperty('--poster-padding', state.style.padding + 'px');
-  els.previewCanvas.style.setProperty('--poster-title-size', state.style.fontSize + 'px');
-  els.previewCanvas.style.setProperty('--movie-color-ratio', state.style.ratio + '%');
-  els.previewCanvas.style.setProperty('--movie-card-ratio', String(getMovieCardRatio()));
+  const resolvedPadding = borderlessMovie ? 0 : state.style.padding;
+  const resolvedRadius = borderlessMovie ? 0 : state.style.radius;
+  setPreviewVar('--image-radius', resolvedRadius + 'px');
+  setPreviewVar('--image-padding', resolvedPadding + 'px');
+  setPreviewVar('--text-font-size', state.style.fontSize + 'px');
+  setPreviewVar('--movie-color-ratio', state.style.ratio + '%');
+  setPreviewVar('--movie-card-ratio', String(getMovieCardRatio()));
   els.previewCanvas.classList.toggle('borderless', borderlessMovie);
   els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
   els.previewCanvas.classList.add('font-' + state.style.font);
@@ -1144,9 +1157,9 @@ function wrapCenteredText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
 }
 
 function getExportFontFamily() {
-  if (state.style.font === 'serif') return 'serif';
+  if (state.style.font === 'serif') return 'Georgia, \"Songti SC\", \"SimSun\", serif';
   if (state.style.font === 'hand' || state.style.font === 'casual') return 'cursive';
-  return 'system-ui, sans-serif';
+  return '-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"PingFang SC\", sans-serif';
 }
 
 function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
