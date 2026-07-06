@@ -34,12 +34,16 @@ test('production compose builds the app server image with configurable host port
 test('production geocode proxy identifies Color Walk to Nominatim', async () => {
   const compose = await readProjectFile('docker-compose.yml');
   const server = await readProjectFile('server.js');
+  const readme = await readProjectFile('README.md');
 
   assert.doesNotMatch(compose, /example\.invalid/);
   assert.doesNotMatch(server, /example\.invalid/);
   assert.match(compose, /GEOCODE_USER_AGENT: "\$\{GEOCODE_USER_AGENT:-ColorWalk\/0\.1 \(https:\/\/github\.com\/shpdnkti\/color-walk\)\}"/);
+  assert.ok(compose.includes("GEOCODE_REVERSE_URL: \"${GEOCODE_REVERSE_URL:-https://nominatim.openstreetmap.org/reverse}\""));
+  assert.match(server, /process.env.GEOCODE_REVERSE_URL/);
   assert.match(server, /'User-Agent': process\.env\.GEOCODE_USER_AGENT \|\| DEFAULT_GEOCODE_USER_AGENT/);
   assert.match(server, /Referer: DEFAULT_GEOCODE_REFERER/);
+  assert.match(readme, /GEOCODE_REVERSE_URL/);
 });
 
 test('production exposes OpenAI endpoint and request tuning configuration', async () => {

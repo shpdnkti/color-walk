@@ -32,7 +32,7 @@ docker compose up --build -d
 APP_PORT=3000 docker compose up --build -d
 ```
 
-如果要在容器里启用 AI 识图，请把 `OPENAI_API_KEY` 作为环境变量传给 Compose。Compose 也会透传 `OPENAI_BASE_URL`、`OPENAI_VISION_MODEL` 和 `OPENAI_REQUEST_TIMEOUT_MS`，其中 `OPENAI_BASE_URL` 默认是 `https://api.openai.com/v1`。GPS 反查代理默认使用可识别的 Color Walk User-Agent；公开部署时可用 `GEOCODE_USER_AGENT` 替换成你自己的应用标识。
+如果要在容器里启用 AI 识图，请把 `OPENAI_API_KEY` 作为环境变量传给 Compose。Compose 也会透传 `OPENAI_BASE_URL`、`OPENAI_VISION_MODEL` 和 `OPENAI_REQUEST_TIMEOUT_MS`，其中 `OPENAI_BASE_URL` 默认是 `https://api.openai.com/v1`。GPS 反查代理默认使用 OpenStreetMap/Nominatim，并带上可识别的 Color Walk User-Agent；公开部署时可用 `GEOCODE_REVERSE_URL` 指向自建或兼容的反查服务，用 `GEOCODE_USER_AGENT` 替换成你自己的应用标识。
 
 停止服务：
 

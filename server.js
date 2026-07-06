@@ -13,7 +13,7 @@ const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const OPENAI_RESPONSES_PATH = 'responses';
 const DEFAULT_OPENAI_REQUEST_TIMEOUT_MS = 90000;
 const MAX_OPENAI_REQUEST_TIMEOUT_MS = 2147483647;
-const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
+const DEFAULT_GEOCODE_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 const DEFAULT_GEOCODE_REFERER = 'https://github.com/shpdnkti/color-walk';
 const DEFAULT_GEOCODE_USER_AGENT = 'ColorWalk/0.1 (' + DEFAULT_GEOCODE_REFERER + ')';
 
@@ -117,7 +117,7 @@ async function handleReverseGeocode(url, response) {
     return;
   }
 
-  const upstreamUrl = new URL(NOMINATIM_REVERSE_URL);
+  const upstreamUrl = new URL(process.env.GEOCODE_REVERSE_URL || DEFAULT_GEOCODE_REVERSE_URL);
   upstreamUrl.searchParams.set('format', 'jsonv2');
   upstreamUrl.searchParams.set('addressdetails', '1');
   upstreamUrl.searchParams.set('namedetails', '1');
