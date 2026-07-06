@@ -52,6 +52,30 @@ test('extracts PNG compressed international textual creation time and GPS metada
   assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
 });
 
+test('extracts PNG XMP creation date and GPS metadata', async () => {
+  const xmp = [
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/">',
+    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
+    '<rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:tiff="http://ns.adobe.com/tiff/1.0/"',
+    ' xmp:CreateDate="2026-10-11T12:13:14+08:00" exif:GPSLatitude="31,13.800000N" exif:GPSLongitude="121,28.368000E" tiff:Model="iPhone 16" />',
+    '</rdf:RDF>',
+    '</x:xmpmeta>',
+  ].join('');
+  const buffer = makePng([
+    textChunk('XML:com.adobe.xmp', xmp),
+  ]);
+
+  const metadata = await extractMetadataFromBuffer(buffer, { type: 'image/png', name: 'xmp.png' });
+
+  assert.equal(metadata.rawDate, '2026:10:11 12:13:14');
+  assert.equal(metadata.date, '2026-10-11');
+  assert.equal(metadata.displayDate, '2026.10.11');
+  assert.equal(metadata.latitude, 31.23);
+  assert.equal(metadata.longitude, 121.4728);
+  assert.equal(metadata.gpsLabel, '31.2300, 121.4728');
+  assert.equal(metadata.camera, 'iPhone 16');
+});
+
 test('extracts PNG eXIf TIFF dates', async () => {
   const buffer = makePng([
     chunk('eXIf', makeTiffWithDate('2026:06:07 08:09:10')),

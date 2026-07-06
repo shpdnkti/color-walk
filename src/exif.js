@@ -109,8 +109,31 @@ function readLongitude(parsed) {
 
 function normalizeDecimalCoordinate(value, limit) {
   const number = Number(value);
-  if (!Number.isFinite(number) || number < -limit || number > limit) return null;
-  return Number(number.toFixed(6));
+  const coordinate = Number.isFinite(number) ? number : parseCoordinateText(value);
+  if (!Number.isFinite(coordinate) || coordinate < -limit || coordinate > limit) return null;
+  return Number(coordinate.toFixed(6));
+}
+
+function parseCoordinateText(value) {
+  const text = String(value || '').trim();
+  if (!text) return Number.NaN;
+
+  const refMatch = text.match(/[NSEW]$/i);
+  const ref = refMatch ? refMatch[0].toUpperCase() : '';
+  const cleaned = text.replace(/[NSEW]$/i, '').trim();
+  const parts = cleaned
+    .replace(/[^0-9.+-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(Number);
+
+  if (!parts.length || parts.some(function (part) { return !Number.isFinite(part); })) return Number.NaN;
+  const sign = cleaned.startsWith('-') || ref === 'S' || ref === 'W' ? -1 : 1;
+  const degrees = Math.abs(parts[0]);
+  const minutes = parts[1] || 0;
+  const seconds = parts[2] || 0;
+  return sign * (degrees + minutes / 60 + seconds / 3600);
 }
 
 async function parseMetadata(buffer, fileInfo = {}) {
@@ -277,10 +300,11 @@ function decodeUtf8(bytes) {
 }
 
 function pngTextToParsed(entries) {
-  const dateTime = firstText(entries, ['DateTimeOriginal', 'DateTime', 'Creation Time', 'CreationTime', 'date:create']);
-  const gpsLatitudeDecimal = firstText(entries, ['GPSLatitude', 'Latitude', 'latitude']);
-  const gpsLongitudeDecimal = firstText(entries, ['GPSLongitude', 'Longitude', 'longitude']);
-  const camera = firstText(entries, ['Model', 'Camera', 'Device']);
+  const xmp = xmpTextToParsed(entries);
+  const dateTime = firstText(entries, ['DateTimeOriginal', 'DateTime', 'Creation Time', 'CreationTime', 'date:create']) || xmp.dateTime;
+  const gpsLatitudeDecimal = firstText(entries, ['GPSLatitude', 'Latitude', 'latitude']) || xmp.gpsLatitudeDecimal;
+  const gpsLongitudeDecimal = firstText(entries, ['GPSLongitude', 'Longitude', 'longitude']) || xmp.gpsLongitudeDecimal;
+  const camera = firstText(entries, ['Model', 'Camera', 'Device']) || xmp.camera;
 
   if (!dateTime && !gpsLatitudeDecimal && !gpsLongitudeDecimal && !camera) return null;
 
@@ -290,6 +314,62 @@ function pngTextToParsed(entries) {
     gpsLongitudeDecimal,
     camera,
   };
+}
+
+function xmpTextToParsed(entries) {
+  const packet = findXmpPacket(entries);
+  if (!packet) return {};
+
+  return {
+    dateTime: normalizeXmpDate(firstXmpValue(packet, ['xmp:CreateDate', 'xmp:ModifyDate', 'photoshop:DateCreated', 'exif:DateTimeOriginal'])),
+    gpsLatitudeDecimal: firstXmpValue(packet, ['exif:GPSLatitude']),
+    gpsLongitudeDecimal: firstXmpValue(packet, ['exif:GPSLongitude']),
+    camera: firstXmpValue(packet, ['tiff:Model', 'exif:LensModel']),
+  };
+}
+
+function findXmpPacket(entries) {
+  for (const key of Object.keys(entries)) {
+    const name = key.toLowerCase();
+    const value = String(entries[key] || '');
+    if (name.includes('xmp') || value.includes('<x:xmpmeta') || value.includes('<rdf:RDF')) return value;
+  }
+  return '';
+}
+
+function firstXmpValue(packet, names) {
+  for (const name of names) {
+    const escaped = escapeRegExp(name);
+    const doubleAttribute = new RegExp('(?:^|[\\s<])' + escaped + '\\s*=\\s*"([^"]*)"', 'i').exec(packet);
+    if (doubleAttribute) return decodeXmlEntities(doubleAttribute[1]);
+
+    const singleAttribute = new RegExp("(?:^|[\\s<])" + escaped + "\\s*=\\s*'([^']*)'", 'i').exec(packet);
+    if (singleAttribute) return decodeXmlEntities(singleAttribute[1]);
+
+    const element = new RegExp('<' + escaped + '[^>]*>([\\s\\S]*?)<\\/' + escaped + '>', 'i').exec(packet);
+    if (element) return decodeXmlEntities(element[1]);
+  }
+  return '';
+}
+
+function normalizeXmpDate(value) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return value || '';
+  return match[1] + ':' + match[2] + ':' + match[3] + ' ' + (match[4] || '00') + ':' + (match[5] || '00') + ':' + (match[6] || '00');
+}
+
+function decodeXmlEntities(value) {
+  return String(value || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim();
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
 function firstText(entries, keys) {
