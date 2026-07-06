@@ -116,7 +116,7 @@
                 <div class="field-grid typography-fields">
                   <label>
                     <span class="range-field-header"><span>字号</span><output id="fontSizeValue" class="range-value" for="fontSizeInput">24px</output></span>
-                    <input id="fontSizeInput" type="range" min="16" max="30" value="24" />
+                    <input id="fontSizeInput" type="range" min="16" max="30" value="24" data-range-output="#fontSizeValue" data-range-unit="px" />
                   </label>
                   <label>
                     字体
@@ -156,7 +156,7 @@
                     <label for="ratioInput">色块比例</label>
                     <div class="range-header-actions"><output id="ratioValue" class="range-value" for="ratioInput">50%</output><button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button></div>
                   </div>
-                  <input id="ratioInput" type="range" min="35" max="65" value="50" />
+                  <input id="ratioInput" type="range" min="35" max="65" value="50" data-range-output="#ratioValue" data-range-unit="%" />
                 </div>
                 <label class="toggle-field">
                   <span>边距切换 Border-less</span>
@@ -180,6 +180,25 @@
     <input id="fileInput" class="visually-hidden" type="file" accept="image/*" multiple />
     <canvas id="workCanvas" class="visually-hidden"></canvas>
     <canvas id="exportCanvas" class="visually-hidden" width="1080" height="1350"></canvas>
-    <script type="module" src="src/app.js?v=20260706-slider-values"></script>
+    <script>
+      (function () {
+        function bindRangeValueOutputs() {
+          document.querySelectorAll('[data-range-output]').forEach(function (input) {
+            const output = document.querySelector(input.dataset.rangeOutput);
+            const unit = input.dataset.rangeUnit || '';
+            if (!output) return;
+            const sync = function () {
+              output.textContent = input.value + unit;
+            };
+            input.addEventListener('input', sync);
+            input.addEventListener('change', sync);
+            sync();
+          });
+        }
+
+        bindRangeValueOutputs();
+      }());
+    </script>
+    <script type="module" src="src/app.js?v=20260706-slider-values-live"></script>
   </body>
 </html>

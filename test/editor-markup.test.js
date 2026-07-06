@@ -216,6 +216,11 @@ test('shows live numeric values for font size and color ratio sliders', () => {
   assert.match(html, /id="fontSizeValue"/);
   assert.match(html, /id="ratioValue"/);
   assert.match(html, /src="src\/app\.js\?v=[^"]+"/);
+  assert.match(html, /id="fontSizeInput"[^>]+data-range-output="#fontSizeValue"[^>]+data-range-unit="px"/);
+  assert.match(html, /id="ratioInput"[^>]+data-range-output="#ratioValue"[^>]+data-range-unit="%"/);
+  assert.match(html, /function bindRangeValueOutputs\(\)/);
+  assert.match(html, /addEventListener\('input', sync\)/);
+  assert.match(html, /addEventListener\('change', sync\)/);
   assert.match(appJs, /fontSizeValue: document\.querySelector\('#fontSizeValue'\)/);
   assert.match(appJs, /ratioValue: document\.querySelector\('#ratioValue'\)/);
   assert.match(appJs, /function syncRangeValueOutputs\(\)/);
