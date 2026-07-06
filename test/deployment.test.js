@@ -42,6 +42,21 @@ test('production geocode proxy identifies Color Walk to Nominatim', async () => 
   assert.match(server, /Referer: DEFAULT_GEOCODE_REFERER/);
 });
 
+test('production exposes OpenAI endpoint and request tuning configuration', async () => {
+  const compose = await readProjectFile('docker-compose.yml');
+  const server = await readProjectFile('server.js');
+  const readme = await readProjectFile('README.md');
+
+  assert.ok(compose.includes("OPENAI_BASE_URL: \"${OPENAI_BASE_URL:-https://api.openai.com/v1}\""));
+  assert.ok(compose.includes("OPENAI_REQUEST_TIMEOUT_MS: \"${OPENAI_REQUEST_TIMEOUT_MS:-90000}\""));
+  assert.ok(server.includes("DEFAULT_OPENAI_BASE_URL") && server.includes("https://api.openai.com/v1"));
+  assert.match(server, /process.env.OPENAI_BASE_URL/);
+  assert.match(server, /process.env.OPENAI_REQUEST_TIMEOUT_MS/);
+  assert.match(server, /AbortSignal.timeout/);
+  assert.match(readme, /OPENAI_BASE_URL/);
+  assert.match(readme, /OPENAI_REQUEST_TIMEOUT_MS/);
+});
+
 test('preview compose serves the live source tree from a separate yaml', async () => {
   const compose = await readProjectFile('docker-compose.preview.yml');
 

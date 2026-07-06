@@ -4,17 +4,19 @@
 
 ## 本地运行
 
-OpenAI 识图会读取环境变量 `OPENAI_API_KEY`，也会自动加载项目根目录的 `.env.local` 或 `.env`。没有密钥时，编辑器的手动文案、拼贴、导出和 GPS 坐标读取仍然可用，只有 `AI识图` 会提示失败。
+OpenAI 识图会读取环境变量 `OPENAI_API_KEY`，也会自动加载项目根目录的 `.env.local` 或 `.env`。可用 `OPENAI_BASE_URL` 指向 OpenAI 兼容代理或自建网关，用 `OPENAI_VISION_MODEL` 调整模型，用 `OPENAI_REQUEST_TIMEOUT_MS` 调整请求超时。没有密钥时，编辑器的手动文案、拼贴、导出和 GPS 坐标读取仍然可用，只有 `AI识图` 会提示失败。
 
 ```bash
 npm start
 ```
 
-默认访问地址是 `http://localhost:3000`。如需换模型或端口：
+默认访问地址是 `http://localhost:3000`。如需换 OpenAI 接口、模型、超时或端口：
 
 ```bash
-OPENAI_VISION_MODEL=gpt-5.5 PORT=3001 npm start
+OPENAI_BASE_URL=https://api.openai.com/v1 OPENAI_VISION_MODEL=gpt-5.5 OPENAI_REQUEST_TIMEOUT_MS=90000 PORT=3001 npm start
 ```
+
+`OPENAI_BASE_URL` 填 API 根路径即可，服务端会自动追加 `/responses`。
 
 ## 生产部署
 
@@ -30,7 +32,7 @@ docker compose up --build -d
 APP_PORT=3000 docker compose up --build -d
 ```
 
-如果要在容器里启用 AI 识图，请把 `OPENAI_API_KEY` 作为环境变量传给 Compose。GPS 反查代理默认使用可识别的 Color Walk User-Agent；公开部署时可用 `GEOCODE_USER_AGENT` 替换成你自己的应用标识。
+如果要在容器里启用 AI 识图，请把 `OPENAI_API_KEY` 作为环境变量传给 Compose。Compose 也会透传 `OPENAI_BASE_URL`、`OPENAI_VISION_MODEL` 和 `OPENAI_REQUEST_TIMEOUT_MS`，其中 `OPENAI_BASE_URL` 默认是 `https://api.openai.com/v1`。GPS 反查代理默认使用可识别的 Color Walk User-Agent；公开部署时可用 `GEOCODE_USER_AGENT` 替换成你自己的应用标识。
 
 停止服务：
 

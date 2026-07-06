@@ -9,7 +9,10 @@ import { buildVisionRequest, parseVisionResponse } from './server/vision.js';
 const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
-const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
+const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const OPENAI_RESPONSES_PATH = 'responses';
+const DEFAULT_OPENAI_REQUEST_TIMEOUT_MS = 90000;
+const MAX_OPENAI_REQUEST_TIMEOUT_MS = 2147483647;
 const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 const DEFAULT_GEOCODE_REFERER = 'https://github.com/shpdnkti/color-walk';
 const DEFAULT_GEOCODE_USER_AGENT = 'ColorWalk/0.1 (' + DEFAULT_GEOCODE_REFERER + ')';
@@ -66,14 +69,16 @@ async function handleAnalyzeImage(request, response) {
     images,
     context: payload.context || {},
   });
+  const openAIConfig = getOpenAIConfig();
 
-  const upstream = await fetch(OPENAI_RESPONSES_URL, {
+  const upstream = await fetch(openAIConfig.responsesUrl, {
     method: 'POST',
     headers: {
       Authorization: 'Bearer ' + apiKey,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(visionRequest),
+    signal: AbortSignal.timeout(openAIConfig.timeoutMs),
   });
 
   if (!upstream.ok) {
@@ -196,6 +201,25 @@ function validateImages(images) {
   }).filter(function (image) {
     return /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(image.dataUrl);
   });
+}
+
+function getOpenAIConfig() {
+  return {
+    responsesUrl: buildOpenAIResponsesUrl(process.env.OPENAI_BASE_URL),
+    timeoutMs: parsePositiveInteger(process.env.OPENAI_REQUEST_TIMEOUT_MS, DEFAULT_OPENAI_REQUEST_TIMEOUT_MS, MAX_OPENAI_REQUEST_TIMEOUT_MS),
+  };
+}
+
+function buildOpenAIResponsesUrl(baseUrl) {
+  const rawBaseUrl = String(baseUrl || DEFAULT_OPENAI_BASE_URL).trim() || DEFAULT_OPENAI_BASE_URL;
+  const normalizedBaseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : rawBaseUrl + '/';
+  return new URL(OPENAI_RESPONSES_PATH, normalizedBaseUrl).toString();
+}
+
+function parsePositiveInteger(value, fallback, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.min(Math.floor(number), max);
 }
 
 function safeErrorCode(value) {
