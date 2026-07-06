@@ -670,6 +670,25 @@ p {
   font-weight: 800;
 }
 
+.panel-title-actions {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.compact-text-button {
+  width: auto;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.text-button:disabled {
+  cursor: progress;
+  opacity: 0.58;
+}
+
 .layout-rail {
   display: flex;
   gap: 10px;
@@ -811,6 +830,12 @@ p {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.photo-card.is-dragging {
+  opacity: 0.54;
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
 }
 
 .color-chip {

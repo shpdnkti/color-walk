@@ -5,10 +5,14 @@ services:
     build: .
     image: color-walk-collage:local
     ports:
-      - "${APP_PORT:-8080}:80"
+      - "${APP_PORT:-8080}:3000"
+    environment:
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_VISION_MODEL: "${OPENAI_VISION_MODEL:-gpt-5.5}"
+      GEOCODE_USER_AGENT: "${GEOCODE_USER_AGENT:-ColorWalk/0.1 (https://github.com/shpdnkti/color-walk)}"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3

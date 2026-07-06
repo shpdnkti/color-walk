@@ -221,3 +221,43 @@ test('does not reverse uploaded movie poster color-bottom layout twice', () => {
   assert.doesNotMatch(css, /\.movie-poster-inner\.has-photo\.color-bottom\s*\{\s*flex-direction:\s*column-reverse;/);
 });
 
+
+
+test('wires draggable photo sorting controls in the palette panel', () => {
+  assert.match(appJs, /function movePhoto/);
+  assert.match(appJs, /card.draggable = true/);
+  assert.match(appJs, /dragstart/);
+  assert.match(appJs, /drop/);
+  assert.match(css, /.photo-card.is-dragging/);
+});
+
+test('restores and auto-saves local drafts with image data', () => {
+  assert.match(appJs, /restoreDraft/);
+  assert.match(appJs, /scheduleDraftSave/);
+  assert.match(appJs, /serializeDraft/);
+  assert.match(appJs, /parseDraft/);
+  assert.match(appJs, /dataUrl/);
+});
+
+test('uses a DOM snapshot export path before the canvas fallback', () => {
+  assert.match(appJs, /drawPreviewDomToCanvas/);
+  assert.match(appJs, /foreignObject/);
+  assert.match(appJs, /clonePreviewForExport/);
+  assert.ok(appJs.includes('drawExport(ctx, canvas.width, canvas.height)'));
+});
+
+test('requests readable place names for GPS metadata', () => {
+  assert.match(appJs, /reverseGeocodePhoto/);
+  assert.ok(appJs.includes('/api/reverse-geocode'));
+  assert.match(appJs, /formatReverseGeocodeLabel/);
+});
+
+
+test('wires real AI image recognition controls into the copy workflow', () => {
+  assert.match(html, /id="aiAnalyzeButton"/);
+  assert.match(html, />AI识图</);
+  assert.match(appJs, /aiAnalyzeButton/);
+  assert.match(appJs, /function analyzePhotosWithAI/);
+  assert.ok(appJs.includes('/api/analyze-image'));
+  assert.match(appJs, /visionInsight/);
+});

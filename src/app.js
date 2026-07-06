@@ -1,5 +1,7 @@
 import { buildPaletteSummary, findDominantColor, getReadableTextColor } from './color.js';
+import { parseDraft, serializeDraft } from './draft.js';
 import { extractPhotoMetadata } from './exif.js';
+import { buildReverseGeocodeUrl, formatReverseGeocodeLabel } from './geocode.js';
 import {
   copyStyleDefinitions,
   describeColor,
@@ -7,6 +9,11 @@ import {
   layoutDefinitions,
   panelDefinitions,
 } from './templates.js';
+
+const DRAFT_STORAGE_KEY = 'color-walk-draft';
+const GEOCODE_CACHE_KEY = 'color-walk-geocode-cache';
+const DIRECT_NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
+let draftSaveTimer = 0;
 
 const outputRatioConfig = {
   ratioPresets: [
@@ -25,6 +32,9 @@ const state = {
   customColor: '#2a4252',
   movieColorOnTop: true,
   copyDirty: false,
+  restoringDraft: false,
+  draggedPhotoId: null,
+  visionInsight: null,
   photoTransforms: new Map(),
   imageGesture: {
     activePhotoId: null,
@@ -74,6 +84,7 @@ const els = {
   layoutHint: document.querySelector('#layoutHint'),
   panelTabBar: document.querySelector('#panelTabBar'),
   panelContent: document.querySelector('#panelContent'),
+  aiAnalyzeButton: document.querySelector('#aiAnalyzeButton'),
   copyGenerateButton: document.querySelector('#copyGenerateButton'),
   copyTextButton: document.querySelector('#copyTextButton'),
   copyStyleSelect: document.querySelector('#copyStyleSelect'),
@@ -107,7 +118,7 @@ const els = {
 
 init();
 
-function init() {
+async function init() {
   renderPanelTabs();
   renderLayoutControls();
   renderCopyStyleOptions();
@@ -115,14 +126,17 @@ function init() {
   bindEvents();
   applyStyleControls();
   applyCanvasViewport();
-  seedCopy(true);
+  const restored = await restoreDraft();
+  if (!restored) seedCopy(true);
   renderAll();
+  if (restored) els.exportStatus.textContent = '已恢复上次草稿。';
 }
 
 function bindEvents() {
   els.fileInput.addEventListener('change', handleFiles);
   els.resetButton.addEventListener('click', handleResetUpload);
   els.stashButton.addEventListener('click', stashDraft);
+  els.aiAnalyzeButton.addEventListener('click', analyzePhotosWithAI);
   els.copyGenerateButton.addEventListener('click', function () {
     state.copyDirty = false;
     seedCopy(true);
@@ -224,15 +238,16 @@ async function handleFiles(event) {
 }
 
 async function createPhotoItem(file) {
-  const src = URL.createObjectURL(file);
-  const image = await loadImage(src);
+  const dataUrl = await fileToDataUrl(file);
+  const image = await loadImage(dataUrl);
   const dominant = extractDominantColor(image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
   const metadata = await extractPhotoMetadata(file);
 
   return {
     id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
     fileName: file.name,
-    src,
+    src: dataUrl,
+    dataUrl,
     image,
     dominantColor: dominant,
     textColor: getReadableTextColor(dominant.hex),
@@ -265,6 +280,199 @@ function hydrateGlobalMetadata() {
   const firstWithGps = state.photos.find(function (photo) { return photo.metadata.gpsLabel; });
   if (!els.dateInput.value && firstWithDate) els.dateInput.value = firstWithDate.metadata.date;
   if (!els.placeInput.value && firstWithGps) els.placeInput.value = firstWithGps.metadata.gpsLabel;
+  if (firstWithGps) reverseGeocodePhoto(firstWithGps);
+}
+
+async function reverseGeocodePhoto(photo) {
+  const latitude = photo?.metadata?.latitude;
+  const longitude = photo?.metadata?.longitude;
+  if (latitude === null || latitude === undefined || longitude === null || longitude === undefined) return;
+
+  const cacheKey = Number(latitude).toFixed(5) + ',' + Number(longitude).toFixed(5);
+  const cache = readGeocodeCache();
+  if (cache[cacheKey]) {
+    applyReverseGeocodeLabel(cache[cacheKey], photo);
+    return;
+  }
+
+  const endpoints = getReverseGeocodeEndpoints(latitude, longitude);
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const label = data.label || formatReverseGeocodeLabel(data);
+      if (!label) continue;
+      cache[cacheKey] = label;
+      writeGeocodeCache(cache);
+      applyReverseGeocodeLabel(label, photo);
+      els.exportStatus.textContent = '已反查地点：' + label + '。地点数据来自 OpenStreetMap/Nominatim。';
+      return;
+    } catch (error) {
+      // Try the next configured endpoint; the coordinate label remains usable offline.
+    }
+  }
+}
+
+function applyReverseGeocodeLabel(label, photo) {
+  photo.metadata.placeLabel = label;
+  if (!els.placeInput.value || els.placeInput.value === photo.metadata.gpsLabel) {
+    els.placeInput.value = label;
+    state.copyDirty = false;
+    seedCopy();
+    renderPreview();
+  }
+}
+
+function getReverseGeocodeEndpoints(latitude, longitude) {
+  const customEndpoint = window.COLOR_WALK_CONFIG?.reverseGeocodeEndpoint || '';
+  const endpoints = [];
+  if (customEndpoint) endpoints.push(buildReverseGeocodeUrl(customEndpoint, latitude, longitude));
+  endpoints.push(buildReverseGeocodeUrl('/api/reverse-geocode', latitude, longitude));
+
+  const directUrl = new URL(DIRECT_NOMINATIM_ENDPOINT);
+  directUrl.searchParams.set('format', 'jsonv2');
+  directUrl.searchParams.set('addressdetails', '1');
+  directUrl.searchParams.set('namedetails', '1');
+  directUrl.searchParams.set('zoom', '17');
+  directUrl.searchParams.set('layer', 'address,poi');
+  directUrl.searchParams.set('accept-language', 'zh-CN');
+  directUrl.searchParams.set('lat', String(latitude));
+  directUrl.searchParams.set('lon', String(longitude));
+  endpoints.push(directUrl.toString());
+  return endpoints.filter(Boolean);
+}
+
+function readGeocodeCache() {
+  try {
+    return JSON.parse(localStorage.getItem(GEOCODE_CACHE_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeGeocodeCache(cache) {
+  try {
+    localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Cache misses are acceptable; reverse geocoding still works when online.
+  }
+}
+
+async function analyzePhotosWithAI() {
+  if (!state.photos.length) {
+    els.exportStatus.textContent = '请先上传图片，再使用 AI 识图。';
+    return;
+  }
+
+  els.aiAnalyzeButton.disabled = true;
+  els.exportStatus.textContent = 'AI 正在识别图片内容...';
+  try {
+    const response = await fetch('/api/analyze-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        images: state.photos.slice(0, 4).map(function (photo) {
+          return {
+            dataUrl: photo.dataUrl || photo.src,
+            fileName: photo.fileName,
+          };
+        }),
+        context: {
+          place: els.placeInput.value,
+          date: els.dateInput.value,
+          keywords: els.keywordInput.value,
+        },
+      }),
+    });
+
+    const payload = await response.json().catch(function () { return {}; });
+    if (!response.ok) {
+      const reason = payload.code || payload.error || 'analyze_failed';
+      throw new Error(reason);
+    }
+
+    applyVisionInsight(payload.insight || {});
+  } catch (error) {
+    els.exportStatus.textContent = getAiErrorMessage(error);
+  } finally {
+    els.aiAnalyzeButton.disabled = false;
+  }
+}
+
+function getAiErrorMessage(error) {
+  if (error?.message === 'openai_api_key_missing') return 'AI 识图暂时不可用：缺少 OpenAI API Key。';
+  if (error?.message === 'insufficient_quota') return 'AI 识图暂时不可用：OpenAI 额度不足。';
+  return 'AI 识图失败，请稍后再试或继续手动输入关键词。';
+}
+
+function applyVisionInsight(insight) {
+  const normalized = normalizeClientVisionInsight(insight);
+  state.visionInsight = normalized;
+
+  const keywordText = mergeKeywordText(els.keywordInput.value, normalized.keywords.concat(normalized.subjects));
+  if (keywordText) els.keywordInput.value = keywordText;
+
+  state.copyDirty = false;
+  seedCopy(true);
+
+  if (normalized.description) {
+    els.bodyInput.value = appendSentence(els.bodyInput.value, normalized.description);
+  }
+
+  const tagText = mergeTags(els.tagsInput.value, normalized.tags).join(' ');
+  if (tagText) els.tagsInput.value = tagText;
+
+  renderPreview();
+  scheduleDraftSave();
+  const visibleKeywords = normalized.keywords.slice(0, 4).join('、') || normalized.scene || '图片内容';
+  els.exportStatus.textContent = 'AI 已识别：' + visibleKeywords + '。';
+}
+
+function normalizeClientVisionInsight(insight = {}) {
+  return {
+    keywords: normalizeTextList(insight.keywords, 8),
+    subjects: normalizeTextList(insight.subjects, 6),
+    scene: cleanPlainText(insight.scene).slice(0, 40),
+    mood: cleanPlainText(insight.mood).slice(0, 32),
+    description: cleanPlainText(insight.description).slice(0, 140),
+    tags: mergeTags('', insight.tags).slice(0, 8),
+  };
+}
+
+function mergeKeywordText(existing, additions) {
+  return normalizeTextList(splitKeywordText(existing).concat(additions || []), 14).join('、');
+}
+
+function splitKeywordText(value) {
+  return String(value || '').split(/[、,，/|\s]+/u).map(cleanPlainText).filter(Boolean);
+}
+
+function normalizeTextList(value, limit) {
+  return Array.isArray(value)
+    ? value.map(cleanPlainText).filter(Boolean).filter(function (item, index, list) { return list.indexOf(item) === index; }).slice(0, limit)
+    : [];
+}
+
+function mergeTags(existing, additions) {
+  const parts = String(existing || '').split(/[\s,，]+/u).concat(additions || []);
+  return parts.map(normalizeTag).filter(Boolean).filter(function (item, index, list) { return list.indexOf(item) === index; }).slice(0, 12);
+}
+
+function normalizeTag(value) {
+  const cleaned = cleanPlainText(value).replace(/^#+/, '');
+  return cleaned ? '#' + cleaned : '';
+}
+
+function appendSentence(body, sentence) {
+  const cleanBody = String(body || '').trim();
+  if (!cleanBody) return sentence;
+  if (cleanBody.includes(sentence)) return cleanBody;
+  return cleanBody + ' ' + sentence;
+}
+
+function cleanPlainText(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
 }
 
 function seedCopy(force) {
@@ -606,6 +814,28 @@ function renderPhotos() {
   state.photos.forEach(function (photo) {
     const card = document.createElement('article');
     card.className = 'photo-card';
+    card.dataset.photoId = photo.id;
+    card.draggable = true;
+    card.addEventListener('dragstart', function (event) {
+      state.draggedPhotoId = photo.id;
+      card.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', photo.id);
+    });
+    card.addEventListener('dragend', function () {
+      state.draggedPhotoId = null;
+      card.classList.remove('is-dragging');
+    });
+    card.addEventListener('dragover', function (event) {
+      if (!state.draggedPhotoId || state.draggedPhotoId === photo.id) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    card.addEventListener('drop', function (event) {
+      event.preventDefault();
+      const draggedId = event.dataTransfer.getData('text/plain') || state.draggedPhotoId;
+      movePhoto(draggedId, photo.id);
+    });
 
     const img = document.createElement('img');
     img.src = photo.src;
@@ -623,7 +853,7 @@ function renderPhotos() {
     remove.setAttribute('aria-label', '删除图片');
     remove.textContent = '×';
     remove.addEventListener('click', function () {
-      URL.revokeObjectURL(photo.src);
+      revokePhotoUrl(photo);
       state.photoTransforms.delete(photo.id);
       state.photos = state.photos.filter(function (item) { return item.id !== photo.id; });
       state.copyDirty = false;
@@ -634,6 +864,17 @@ function renderPhotos() {
     card.append(img, chip, remove);
     els.photoGrid.append(card);
   });
+}
+
+function movePhoto(sourceId, targetId) {
+  if (!sourceId || !targetId || sourceId === targetId) return;
+  const sourceIndex = state.photos.findIndex(function (photo) { return photo.id === sourceId; });
+  const targetIndex = state.photos.findIndex(function (photo) { return photo.id === targetId; });
+  if (sourceIndex === -1 || targetIndex === -1) return;
+  const moved = state.photos.splice(sourceIndex, 1)[0];
+  state.photos.splice(targetIndex, 0, moved);
+  renderAll();
+  els.exportStatus.textContent = '图片顺序已更新。';
 }
 
 function renderPalette() {
@@ -684,6 +925,7 @@ function renderPreview() {
   if (layout.id === 'movie-poster') {
     renderMoviePoster(inner);
     els.previewCanvas.append(inner);
+    scheduleDraftSave();
     return;
   }
 
@@ -715,6 +957,7 @@ function renderPreview() {
   }
 
   els.previewCanvas.append(inner);
+  scheduleDraftSave();
 }
 
 function renderMoviePoster(inner) {
@@ -887,6 +1130,7 @@ function getPhotoTransform(photoId) {
 
 function setPhotoTransform(photoId, transform) {
   state.photoTransforms.set(photoId, clampPhotoTransform(transform));
+  scheduleDraftSave();
 }
 
 function applyPhotoTransformToElement(element, photoId) {
@@ -923,6 +1167,7 @@ function applyStyleControls() {
   els.previewCanvas.classList.toggle('borderless', borderlessMovie);
   els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
   els.previewCanvas.classList.add('font-' + state.style.font);
+  scheduleDraftSave();
 }
 
 function getMovieCardRatio() {
@@ -934,23 +1179,107 @@ function getMovieCardRatio() {
 }
 
 function stashDraft() {
-  const draft = {
+  saveDraft(true);
+}
+
+function scheduleDraftSave() {
+  if (state.restoringDraft) return;
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(function () { saveDraft(false); }, 250);
+}
+
+function saveDraft(showStatus) {
+  try {
+    localStorage.setItem(DRAFT_STORAGE_KEY, serializeDraft(getDraftSnapshot()));
+    if (showStatus) els.exportStatus.textContent = '已保存当前图片、布局、文案和样式草稿。';
+  } catch (error) {
+    if (showStatus) els.exportStatus.textContent = '草稿保存失败，可能是图片过大导致浏览器存储空间不足。';
+  }
+}
+
+function getDraftSnapshot() {
+  return {
     selectedLayout: state.selectedLayout,
     activePanel: state.activePanel,
-    place: els.placeInput.value,
-    date: els.dateInput.value,
-    time: els.timeInput.value,
-    keyword: els.keywordInput.value,
-    copyStyle: els.copyStyleSelect.value,
-    title: els.titleInput.value,
-    body: els.bodyInput.value,
-    tags: els.tagsInput.value,
-    style: state.style,
+    movieColorOnTop: state.movieColorOnTop,
     customColor: state.customColor,
-    colors: getPaletteColors(),
+    visionInsight: state.visionInsight,
+    fields: {
+      place: els.placeInput.value,
+      date: els.dateInput.value,
+      time: els.timeInput.value,
+      keyword: els.keywordInput.value,
+      copyStyle: els.copyStyleSelect.value,
+      title: els.titleInput.value,
+      body: els.bodyInput.value,
+      tags: els.tagsInput.value,
+    },
+    style: state.style,
+    photos: state.photos.map(function (photo) {
+      return {
+        id: photo.id,
+        fileName: photo.fileName,
+        dataUrl: photo.dataUrl || photo.src,
+        dominantColor: photo.dominantColor,
+        textColor: photo.textColor,
+        metadata: photo.metadata,
+        naturalWidth: photo.naturalWidth,
+        naturalHeight: photo.naturalHeight,
+        ratio: photo.ratio,
+        transform: getPhotoTransform(photo.id),
+      };
+    }),
   };
-  localStorage.setItem('color-walk-draft', JSON.stringify(draft));
-  els.exportStatus.textContent = '已暂存当前布局、文案和样式。';
+}
+
+async function restoreDraft() {
+  const draft = parseDraft(localStorage.getItem(DRAFT_STORAGE_KEY));
+  if (!draft) return false;
+  state.restoringDraft = true;
+  try {
+    state.selectedLayout = draft.selectedLayout;
+    state.activePanel = draft.activePanel;
+    state.movieColorOnTop = draft.movieColorOnTop;
+    state.customColor = draft.customColor;
+    state.visionInsight = draft.visionInsight;
+    state.style = { ...state.style, ...draft.style };
+    els.placeInput.value = draft.fields.place;
+    els.dateInput.value = draft.fields.date;
+    els.timeInput.value = draft.fields.time;
+    els.keywordInput.value = draft.fields.keyword;
+    els.copyStyleSelect.value = draft.fields.copyStyle;
+    els.titleInput.value = draft.fields.title;
+    els.bodyInput.value = draft.fields.body;
+    els.tagsInput.value = draft.fields.tags;
+    state.photos = [];
+    state.photoTransforms.clear();
+    for (const photo of draft.photos) {
+      const image = await loadImage(photo.dataUrl);
+      state.photos.push({ ...photo, src: photo.dataUrl, image });
+      state.photoTransforms.set(photo.id, photo.transform);
+    }
+    renderPanelTabs();
+    renderLayoutControls();
+    renderRatioPresets();
+    syncStyleInputs();
+    applyCanvasViewport();
+    return true;
+  } catch (error) {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    return false;
+  } finally {
+    state.restoringDraft = false;
+  }
+}
+
+function syncStyleInputs() {
+  els.radiusInput.value = String(state.style.radius);
+  els.paddingInput.value = String(state.style.padding);
+  els.ratioInput.value = String(state.style.ratio);
+  els.fontSizeInput.value = String(state.style.fontSize);
+  els.fontSelect.value = state.style.font;
+  els.borderlessInput.checked = state.style.borderless;
+  applyStyleControls();
 }
 
 async function copyCurrentText() {
@@ -972,9 +1301,13 @@ async function exportPng() {
   els.exportStatus.textContent = '正在生成 PNG...';
   const canvas = els.exportCanvas;
   canvas.width = 1080;
-  canvas.height = state.selectedLayout === 'movie-poster' ? getMoviePosterExportHeight(1080) : getOutputExportHeight(1080);
+  canvas.height = getDomExportHeight(canvas.width);
   const ctx = canvas.getContext('2d');
-  drawExport(ctx, canvas.width, canvas.height);
+  try {
+    await drawPreviewDomToCanvas(ctx, canvas.width, canvas.height);
+  } catch (error) {
+    drawExport(ctx, canvas.width, canvas.height);
+  }
 
   canvas.toBlob(function (blob) {
     if (!blob) {
@@ -989,6 +1322,43 @@ async function exportPng() {
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     els.exportStatus.textContent = '已导出 PNG。';
   }, 'image/png', 0.95);
+}
+
+function getDomExportHeight(width) {
+  const rect = els.previewCanvas.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) return Math.round(width * (rect.height / rect.width));
+  return state.selectedLayout === 'movie-poster' ? getMoviePosterExportHeight(width) : getOutputExportHeight(width);
+}
+
+async function drawPreviewDomToCanvas(ctx, width, height) {
+  const clone = clonePreviewForExport(width, height);
+  const cssText = collectExportCssText();
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml"><style>' + cssText + '</style>' + serialized + '</div></foreignObject></svg>';
+  const image = await loadImage('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+}
+
+function clonePreviewForExport(width, height) {
+  const clone = els.previewCanvas.cloneNode(true);
+  clone.style.width = width + 'px';
+  clone.style.height = height + 'px';
+  clone.style.maxWidth = 'none';
+  clone.style.maxHeight = 'none';
+  clone.style.boxShadow = 'none';
+  clone.style.transform = 'none';
+  return clone;
+}
+
+function collectExportCssText() {
+  return Array.from(document.styleSheets).map(function (sheet) {
+    try {
+      return Array.from(sheet.cssRules).map(function (rule) { return rule.cssText; }).join('\\n');
+    } catch {
+      return '';
+    }
+  }).join('\\n');
 }
 
 function getMoviePosterExportHeight(width) {
@@ -1235,6 +1605,15 @@ function getDisplayDate() {
   return Number(match.groups.month) + '月' + Number(match.groups.day) + '日';
 }
 
+function fileToDataUrl(file) {
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function () { resolve(String(reader.result || '')); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function loadImage(src) {
   return new Promise(function (resolve, reject) {
     const image = new Image();
@@ -1252,7 +1631,8 @@ function handleResetUpload() {
 }
 
 function resetApp() {
-  state.photos.forEach(function (photo) { URL.revokeObjectURL(photo.src); });
+  state.photos.forEach(revokePhotoUrl);
+  localStorage.removeItem(DRAFT_STORAGE_KEY);
   state.photos = [];
   state.photoTransforms.clear();
   state.imageGesture.activePhotoId = null;
@@ -1260,6 +1640,7 @@ function resetApp() {
   state.imageGesture.pointers.clear();
   state.imageGesture.pinchStartDistance = 0;
   state.copyDirty = false;
+  state.visionInsight = null;
   state.customColor = '#2a4252';
   state.movieColorOnTop = true;
   state.style.outputRatio = '9:16';
@@ -1281,6 +1662,10 @@ function resetApp() {
   seedCopy(true);
   renderAll();
   els.exportStatus.textContent = '';
+}
+
+function revokePhotoUrl(photo) {
+  if (photo?.src && photo.src.startsWith('blob:')) URL.revokeObjectURL(photo.src);
 }
 
 function escapeHtml(value) {

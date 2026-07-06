@@ -1,8 +1,13 @@
-FROM nginx:stable-alpine
+FROM node:22-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY index.html /usr/share/nginx/html/index.html
-COPY src/ /usr/share/nginx/html/src/
-RUN chmod -R a+rX /usr/share/nginx/html /etc/nginx/conf.d/default.conf
+WORKDIR /app
+ENV NODE_ENV=production
 
-EXPOSE 80
+COPY package.json package-lock.json ./
+COPY index.html ./index.html
+COPY src/ ./src/
+COPY server/ ./server/
+COPY server.js ./server.js
+
+EXPOSE 3000
+CMD ["node", "server.js"]
