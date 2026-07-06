@@ -20,34 +20,43 @@ const DEFAULT_GEOCODE_USER_AGENT = 'ColorWalk/0.1 (' + DEFAULT_GEOCODE_REFERER +
 loadEnvFile('.env.local');
 loadEnvFile('.env');
 
-const server = http.createServer(async function (request, response) {
-  try {
-    const url = new URL(request.url || '/', 'http://127.0.0.1');
+export function createColorWalkServer() {
+  return http.createServer(async function (request, response) {
+    try {
+      const url = new URL(request.url || '/', 'http://127.0.0.1');
 
-    if (request.method === 'POST' && url.pathname === '/api/analyze-image') {
-      await handleAnalyzeImage(request, response);
-      return;
+      if (request.method === 'POST' && url.pathname === '/api/analyze-image') {
+        await handleAnalyzeImage(request, response);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/reverse-geocode') {
+        await handleReverseGeocode(url, response);
+        return;
+      }
+
+      if (request.method === 'GET' || request.method === 'HEAD') {
+        serveStatic(url.pathname, request.method, response);
+        return;
+      }
+
+      sendJson(response, 405, { error: 'method_not_allowed' });
+    } catch (error) {
+      sendJson(response, 500, { error: 'server_error' });
     }
+  });
+}
 
-    if (request.method === 'GET' && url.pathname === '/api/reverse-geocode') {
-      await handleReverseGeocode(url, response);
-      return;
-    }
+if (isMainModule()) {
+  const server = createColorWalkServer();
+  server.listen(PORT, '0.0.0.0', function () {
+    console.log('Color Walk server listening on http://127.0.0.1:' + PORT);
+  });
+}
 
-    if (request.method === 'GET' || request.method === 'HEAD') {
-      serveStatic(url.pathname, request.method, response);
-      return;
-    }
-
-    sendJson(response, 405, { error: 'method_not_allowed' });
-  } catch (error) {
-    sendJson(response, 500, { error: 'server_error' });
-  }
-});
-
-server.listen(PORT, '0.0.0.0', function () {
-  console.log('Color Walk server listening on http://127.0.0.1:' + PORT);
-});
+function isMainModule() {
+  return Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+}
 
 async function handleAnalyzeImage(request, response) {
   const apiKey = process.env.OPENAI_API_KEY;
