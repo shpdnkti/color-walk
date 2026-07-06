@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Color Walk 拼贴编辑器</title>
+    <link rel="stylesheet" href="src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell editor-shell">
+      <header class="editor-header" aria-label="编辑器操作栏">
+        <button class="header-button secondary-action" id="resetButton" type="button">🎛️ 重新上传</button>
+        <div class="editor-brand" aria-label="Color Walk">
+          <h1>Color Walk</h1>
+        </div>
+        <div class="header-actions">
+          <button class="header-button stash-action" id="stashButton" type="button">💾 暂存</button>
+          <button class="header-button primary-action" id="exportButton" type="button">📤 导出图片</button>
+        </div>
+      </header>
+
+      <section id="canvasStage" class="canvas-stage" aria-label="实时画布区">
+        <div class="stage-meta" aria-live="polite">
+          <span id="photoCount">0 张</span>
+          <span id="layoutHint">🎬 电影海报</span>
+        </div>
+
+        <div id="canvasViewport" class="canvas-viewport" aria-label="可缩放画布视口">
+          <div id="canvasTransform" class="canvas-transform">
+            <div id="previewCanvas" class="collage-preview layout-movie-poster borderless"></div>
+          </div>
+        </div>
+
+        <div class="canvas-zoom-toolbar" aria-label="画布缩放工具栏">
+          <button id="zoomOutButton" class="zoom-button" type="button" aria-label="缩小画布">−</button>
+          <button id="zoomLevelButton" class="zoom-level-button" type="button" aria-label="重置为 100%">100%</button>
+          <button id="zoomInButton" class="zoom-button" type="button" aria-label="放大画布">+</button>
+          <button id="zoomFitButton" class="zoom-fit-button" type="button">自适应</button>
+        </div>
+
+        <div class="stage-actions">
+          <label class="upload-button" for="fileInput">选择图片</label>
+          <p id="exportStatus" class="status-text" role="status"></p>
+        </div>
+      </section>
+
+      <section id="bottomPanel" class="bottom-panel control-panel" aria-label="操作面板">
+        <div id="controlPanel" class="control-panel-body">
+          <div id="panelTabBar" class="panel-tabbar" role="tablist" aria-label="编辑标签"></div>
+          <div id="panelContent" class="panel-content">
+            <section class="panel-page" data-panel="layout" aria-label="布局设置">
+              <div class="panel-title">
+                <h2>拼贴结构</h2>
+                <span>5 模板</span>
+              </div>
+              <div id="layoutControls" class="layout-rail" role="listbox" aria-label="拼贴布局"></div>
+            </section>
+
+            <section class="panel-page" data-panel="palette" aria-label="色盘设置">
+              <div class="panel-title">
+                <h2>整组色盘</h2>
+                <span id="averageColor">等待图片</span>
+              </div>
+              <div id="paletteStrip" class="palette-strip"></div>
+              <label id="customColorButton" class="custom-color-button" for="customColorInput">➕ 自定义吸色</label>
+              <input id="customColorInput" class="visually-hidden" type="color" value="#2a4252" />
+              <div id="photoGrid" class="photo-grid empty-state">
+                <p>上传 1 到 9 张照片后，这里会显示主色调和 EXIF 信息。</p>
+              </div>
+            </section>
+
+            <section class="panel-page" data-panel="copy" aria-label="文案设置">
+              <div class="panel-title">
+                <h2>文案编辑</h2>
+                <button id="copyGenerateButton" class="text-button" type="button">生成文案</button>
+              </div>
+              <div class="copy-controls">
+                <div class="field-grid compact-fields">
+                  <label>
+                    地点
+                    <input id="placeInput" type="text" placeholder="武康路 / 校园 / 海边" />
+                  </label>
+                  <label>
+                    日期
+                    <input id="dateInput" type="date" />
+                  </label>
+                  <label>
+                    时间
+                    <input id="timeInput" type="time" />
+                  </label>
+                </div>
+                <label>
+                  风格
+                  <select id="copyStyleSelect"></select>
+                </label>
+                <label>
+                  图片关键词
+                  <input id="keywordInput" type="text" placeholder="花、街角、咖啡、树影" />
+                </label>
+                <label>
+                  Title
+                  <input id="titleInput" type="text" />
+                </label>
+                <label>
+                  Body
+                  <textarea id="bodyInput" rows="4"></textarea>
+                </label>
+                <label>
+                  标签
+                  <input id="tagsInput" type="text" />
+                </label>
+                <div class="field-grid typography-fields">
+                  <label>
+                    字号
+                    <input id="fontSizeInput" type="range" min="16" max="30" value="24" />
+                  </label>
+                  <label>
+                    字体
+                    <select id="fontSelect">
+                      <option value="system">系统黑体</option>
+                      <option value="serif">优雅衬线</option>
+                      <option value="hand">手写体</option>
+                      <option value="casual" selected>Casual Handwriting</option>
+                    </select>
+                  </label>
+                </div>
+                <button id="copyTextButton" class="floating-copy-button" type="button">📋 复制文案</button>
+              </div>
+            </section>
+
+            <section class="panel-page" data-panel="style" aria-label="样式设置">
+              <div class="panel-title">
+                <h2>画布样式</h2>
+                <span>实时预览</span>
+              </div>
+              <div class="style-controls">
+                <div class="ratio-control">
+                  <div class="ratio-control-header">
+                    <label for="ratioInput">比例 Ratio</label>
+                    <button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button>
+                  </div>
+                  <input id="ratioInput" type="range" min="35" max="65" value="50" />
+                </div>
+                <label class="toggle-field">
+                  <span>边距切换 Border-less</span>
+                  <input id="borderlessInput" type="checkbox" checked />
+                </label>
+                <label>
+                  圆角
+                  <input id="radiusInput" type="range" min="0" max="32" value="0" />
+                </label>
+                <label>
+                  留白
+                  <input id="paddingInput" type="range" min="0" max="28" value="0" />
+                </label>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <input id="fileInput" class="visually-hidden" type="file" accept="image/*" multiple />
+    <canvas id="workCanvas" class="visually-hidden"></canvas>
+    <canvas id="exportCanvas" class="visually-hidden" width="1080" height="1350"></canvas>
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>

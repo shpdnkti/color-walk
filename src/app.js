@@ -1,0 +1,1058 @@
+import { buildPaletteSummary, findDominantColor, getReadableTextColor } from './color.js';
+import { extractPhotoMetadata } from './exif.js';
+import {
+  copyStyleDefinitions,
+  describeColor,
+  generateCopy,
+  layoutDefinitions,
+  panelDefinitions,
+} from './templates.js';
+
+const state = {
+  photos: [],
+  selectedLayout: 'movie-poster',
+  activePanel: 'style',
+  customColor: '#2a4252',
+  movieColorOnTop: true,
+  copyDirty: false,
+  viewport: {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    isPanning: false,
+    pointerId: null,
+    lastX: 0,
+    lastY: 0,
+    spacePressed: false,
+    pointers: new Map(),
+    pinchStartDistance: 0,
+    pinchStartZoom: 1,
+  },
+  style: {
+    radius: 0,
+    padding: 0,
+    fontSize: 24,
+    font: 'casual',
+    ratio: 50,
+    borderless: true,
+  },
+};
+
+const els = {
+  fileInput: document.querySelector('#fileInput'),
+  resetButton: document.querySelector('#resetButton'),
+  stashButton: document.querySelector('#stashButton'),
+  placeInput: document.querySelector('#placeInput'),
+  dateInput: document.querySelector('#dateInput'),
+  timeInput: document.querySelector('#timeInput'),
+  photoGrid: document.querySelector('#photoGrid'),
+  photoCount: document.querySelector('#photoCount'),
+  paletteStrip: document.querySelector('#paletteStrip'),
+  averageColor: document.querySelector('#averageColor'),
+  layoutControls: document.querySelector('#layoutControls'),
+  layoutHint: document.querySelector('#layoutHint'),
+  panelTabBar: document.querySelector('#panelTabBar'),
+  panelContent: document.querySelector('#panelContent'),
+  copyGenerateButton: document.querySelector('#copyGenerateButton'),
+  copyTextButton: document.querySelector('#copyTextButton'),
+  copyStyleSelect: document.querySelector('#copyStyleSelect'),
+  customColorButton: document.querySelector('#customColorButton'),
+  customColorInput: document.querySelector('#customColorInput'),
+  keywordInput: document.querySelector('#keywordInput'),
+  titleInput: document.querySelector('#titleInput'),
+  bodyInput: document.querySelector('#bodyInput'),
+  tagsInput: document.querySelector('#tagsInput'),
+  radiusInput: document.querySelector('#radiusInput'),
+  paddingInput: document.querySelector('#paddingInput'),
+  ratioInput: document.querySelector('#ratioInput'),
+  equalRatioButton: document.querySelector('#equalRatioButton'),
+  borderlessInput: document.querySelector('#borderlessInput'),
+  fontSizeInput: document.querySelector('#fontSizeInput'),
+  fontSelect: document.querySelector('#fontSelect'),
+  canvasViewport: document.querySelector('#canvasViewport'),
+  canvasTransform: document.querySelector('#canvasTransform'),
+  zoomOutButton: document.querySelector('#zoomOutButton'),
+  zoomLevelButton: document.querySelector('#zoomLevelButton'),
+  zoomInButton: document.querySelector('#zoomInButton'),
+  zoomFitButton: document.querySelector('#zoomFitButton'),
+  previewCanvas: document.querySelector('#previewCanvas'),
+  workCanvas: document.querySelector('#workCanvas'),
+  exportCanvas: document.querySelector('#exportCanvas'),
+  exportButton: document.querySelector('#exportButton'),
+  exportStatus: document.querySelector('#exportStatus'),
+};
+
+init();
+
+function init() {
+  renderPanelTabs();
+  renderLayoutControls();
+  renderCopyStyleOptions();
+  bindEvents();
+  applyStyleControls();
+  applyCanvasViewport();
+  seedCopy(true);
+  renderAll();
+}
+
+function bindEvents() {
+  els.fileInput.addEventListener('change', handleFiles);
+  els.resetButton.addEventListener('click', handleResetUpload);
+  els.stashButton.addEventListener('click', stashDraft);
+  els.copyGenerateButton.addEventListener('click', function () {
+    state.copyDirty = false;
+    seedCopy(true);
+    renderPreview();
+  });
+  els.copyTextButton.addEventListener('click', copyCurrentText);
+  els.customColorInput.addEventListener('input', function () {
+    state.customColor = els.customColorInput.value;
+    renderPreview();
+    els.exportStatus.textContent = els.customColorInput.value.toUpperCase() + ' 已应用为自定义色。';
+  });
+  els.exportButton.addEventListener('click', exportPng);
+  els.zoomOutButton.addEventListener('click', function () { setCanvasZoom(state.viewport.zoom - 0.1); });
+  els.zoomInButton.addEventListener('click', function () { setCanvasZoom(state.viewport.zoom + 0.1); });
+  els.zoomLevelButton.addEventListener('click', function () { resetCanvasViewport(false); });
+  els.zoomFitButton.addEventListener('click', function () { fitCanvasToViewport(false); });
+  els.equalRatioButton.addEventListener('click', function () { setEqualMovieRatio(); });
+  bindCanvasViewportEvents();
+
+  [els.placeInput, els.dateInput, els.timeInput, els.keywordInput, els.copyStyleSelect].forEach(function (input) {
+    input.addEventListener('input', function () {
+      if (!state.copyDirty) seedCopy();
+      renderPreview();
+    });
+  });
+
+  [els.titleInput, els.bodyInput, els.tagsInput].forEach(function (input) {
+    input.addEventListener('input', function () {
+      state.copyDirty = true;
+      renderPreview();
+    });
+  });
+
+  [els.radiusInput, els.paddingInput, els.ratioInput, els.fontSizeInput].forEach(function (input) {
+    input.addEventListener('input', function () {
+      state.style.radius = Number(els.radiusInput.value);
+      state.style.padding = Number(els.paddingInput.value);
+      state.style.ratio = Number(els.ratioInput.value);
+      state.style.fontSize = Number(els.fontSizeInput.value);
+      if ((state.style.radius > 0 || state.style.padding > 0) && state.style.borderless) {
+        state.style.borderless = false;
+        els.borderlessInput.checked = false;
+      }
+      applyStyleControls();
+    });
+  });
+
+  els.borderlessInput.addEventListener('change', function () {
+    state.style.borderless = els.borderlessInput.checked;
+    if (state.style.borderless) {
+      state.style.radius = 0;
+      state.style.padding = 0;
+      els.radiusInput.value = '0';
+      els.paddingInput.value = '0';
+    }
+    applyStyleControls();
+  });
+
+  els.fontSelect.addEventListener('input', function () {
+    state.style.font = els.fontSelect.value;
+    applyStyleControls();
+  });
+}
+
+function toggleMovieColorPosition() {
+  if (state.selectedLayout !== 'movie-poster') return;
+  state.movieColorOnTop = !state.movieColorOnTop;
+  renderPreview();
+  els.exportStatus.textContent = state.movieColorOnTop ? '色块已切换到上方。' : '色块已切换到下方。';
+}
+
+function setEqualMovieRatio() {
+  els.ratioInput.value = '50';
+  state.style.ratio = 50;
+  applyStyleControls();
+  els.exportStatus.textContent = '已设为上下等大。';
+}
+
+async function handleFiles(event) {
+  const files = Array.from(event.target.files || []).slice(0, 9 - state.photos.length);
+  if (!files.length) return;
+  els.exportStatus.textContent = '正在识别图片主色和照片信息...';
+
+  const loaded = await Promise.all(files.map(createPhotoItem));
+  state.photos.push(...loaded.filter(Boolean));
+  hydrateGlobalMetadata();
+  state.customColor = getMainColorHex() || state.customColor;
+  state.copyDirty = false;
+  seedCopy();
+  renderAll();
+  els.exportStatus.textContent = '已完成识别，可以继续调整文本和结构。';
+  requestAnimationFrame(function () { fitCanvasToViewport(true); });
+  event.target.value = '';
+}
+
+async function createPhotoItem(file) {
+  const src = URL.createObjectURL(file);
+  const image = await loadImage(src);
+  const dominant = extractDominantColor(image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
+  const metadata = await extractPhotoMetadata(file);
+
+  return {
+    id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
+    fileName: file.name,
+    src,
+    image,
+    dominantColor: dominant,
+    textColor: getReadableTextColor(dominant.hex),
+    metadata,
+    naturalWidth: image.naturalWidth,
+    naturalHeight: image.naturalHeight,
+    ratio: image.naturalWidth / image.naturalHeight,
+  };
+}
+
+function extractDominantColor(image) {
+  const canvas = els.workCanvas;
+  const size = 72;
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.clearRect(0, 0, size, size);
+  drawImageCover(ctx, image, 0, 0, size, size);
+  const data = ctx.getImageData(0, 0, size, size);
+  return findDominantColor(data.data, size, size, {
+    sampleStep: 2,
+    bucketSize: 16,
+    ignoreNearWhite: true,
+    ignoreNearBlack: true,
+  });
+}
+
+function hydrateGlobalMetadata() {
+  const firstWithDate = state.photos.find(function (photo) { return photo.metadata.date; });
+  const firstWithGps = state.photos.find(function (photo) { return photo.metadata.gpsLabel; });
+  if (!els.dateInput.value && firstWithDate) els.dateInput.value = firstWithDate.metadata.date;
+  if (!els.placeInput.value && firstWithGps) els.placeInput.value = firstWithGps.metadata.gpsLabel;
+}
+
+function seedCopy(force) {
+  const mainColor = getMainColorHex();
+  const colorName = mainColor ? describeColor(mainColor) : '粉色';
+  const keywordText = els.keywordInput.value.trim();
+  const copy = generateCopy({
+    dominantColor: mainColor || '#f05f87',
+    colorName,
+    place: els.placeInput.value,
+    date: els.dateInput.value,
+    time: els.timeInput.value,
+    style: els.copyStyleSelect.value,
+  });
+
+  if (keywordText) {
+    copy.body += ' 这组照片里最想留下的是' + keywordText + '。';
+  }
+
+  if (force || !els.titleInput.value || !state.copyDirty) {
+    els.titleInput.value = copy.title;
+    els.bodyInput.value = copy.body;
+    els.tagsInput.value = copy.tags.join(' ');
+  }
+}
+
+function renderAll() {
+  renderPhotos();
+  renderPalette();
+  renderPreview();
+}
+
+function renderPanelTabs() {
+  els.panelTabBar.innerHTML = '';
+  panelDefinitions.forEach(function (panel) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-tab';
+    button.textContent = panel.label;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(panel.id === state.activePanel));
+    button.addEventListener('click', function () {
+      state.activePanel = panel.id;
+      renderPanelTabs();
+      showActivePanel();
+    });
+    if (panel.id === state.activePanel) button.classList.add('active');
+    els.panelTabBar.append(button);
+  });
+
+  showActivePanel();
+}
+
+function showActivePanel() {
+  els.panelContent.querySelectorAll('[data-panel]').forEach(function (panel) {
+    panel.classList.toggle('active', panel.dataset.panel === state.activePanel);
+  });
+}
+
+function renderCopyStyleOptions() {
+  els.copyStyleSelect.innerHTML = '';
+  copyStyleDefinitions.forEach(function (style) {
+    const option = document.createElement('option');
+    option.value = style.id;
+    option.textContent = style.label;
+    els.copyStyleSelect.append(option);
+  });
+  els.copyStyleSelect.value = 'poster-english';
+}
+
+function renderLayoutControls() {
+  els.layoutControls.innerHTML = '';
+  layoutDefinitions.forEach(function (layout) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'layout-option';
+    button.title = layout.description;
+    button.innerHTML = '<span class="layout-wireframe" aria-hidden="true">' + getLayoutGlyph(layout.id) + '</span><span>' + layout.label + '</span>';
+    button.addEventListener('click', function () {
+      state.selectedLayout = layout.id;
+      if (layout.id === 'movie-poster' && !state.copyDirty) {
+        els.copyStyleSelect.value = 'poster-english';
+        seedCopy(true);
+      }
+      renderLayoutControls();
+      renderPreview();
+    });
+    if (layout.id === state.selectedLayout) button.classList.add('active');
+    els.layoutControls.append(button);
+  });
+}
+
+function getLayoutGlyph(id) {
+  const glyphs = {
+    grid9: '<i></i><i></i><i></i><i></i><i></i><i></i>',
+    stacked: '<i class="wide"></i><i class="wide small"></i>',
+    magazine: '<i class="tall"></i><i></i><i></i>',
+    'color-card-poster': '<i class="wide"></i><i class="swatch"></i><i class="wide small"></i>',
+    'movie-poster': '<i class="wide swatch"></i><i class="wide"></i>',
+  };
+  return glyphs[id] || glyphs.grid9;
+}
+
+function bindCanvasViewportEvents() {
+  els.canvasViewport.addEventListener('dblclick', function (event) {
+    event.preventDefault();
+    toggleMovieColorPosition();
+  });
+
+  els.canvasViewport.addEventListener('wheel', function (event) {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -0.08 : 0.08;
+    setCanvasZoom(state.viewport.zoom + delta);
+  }, { passive: false });
+
+  els.canvasViewport.addEventListener('pointerdown', function (event) {
+    state.viewport.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (state.viewport.pointers.size === 2) {
+      state.viewport.pinchStartDistance = getPointerDistance();
+      state.viewport.pinchStartZoom = state.viewport.zoom;
+      state.viewport.isPanning = false;
+      capturePointer(event.pointerId);
+      return;
+    }
+
+    if (!canStartPan(event)) return;
+    event.preventDefault();
+    state.viewport.isPanning = true;
+    state.viewport.pointerId = event.pointerId;
+    state.viewport.lastX = event.clientX;
+    state.viewport.lastY = event.clientY;
+    capturePointer(event.pointerId);
+    applyCanvasViewport();
+  });
+
+  els.canvasViewport.addEventListener('pointermove', function (event) {
+    if (state.viewport.pointers.has(event.pointerId)) {
+      state.viewport.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+
+    if (state.viewport.pointers.size >= 2 && state.viewport.pinchStartDistance > 0) {
+      event.preventDefault();
+      const distance = getPointerDistance();
+      const zoom = state.viewport.pinchStartZoom * (distance / state.viewport.pinchStartDistance);
+      setCanvasZoom(zoom);
+      return;
+    }
+
+    if (!state.viewport.isPanning || state.viewport.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const dx = event.clientX - state.viewport.lastX;
+    const dy = event.clientY - state.viewport.lastY;
+    state.viewport.panX += dx;
+    state.viewport.panY += dy;
+    state.viewport.lastX = event.clientX;
+    state.viewport.lastY = event.clientY;
+    applyCanvasViewport();
+  });
+
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (eventName) {
+    els.canvasViewport.addEventListener(eventName, function (event) {
+      state.viewport.pointers.delete(event.pointerId);
+      if (state.viewport.pointerId === event.pointerId) {
+        state.viewport.isPanning = false;
+        state.viewport.pointerId = null;
+      }
+      if (state.viewport.pointers.size < 2) {
+        state.viewport.pinchStartDistance = 0;
+      }
+      applyCanvasViewport();
+    });
+  });
+
+  window.addEventListener('keydown', function (event) {
+    if (event.code !== 'Space' || isTypingTarget(event.target)) return;
+    event.preventDefault();
+    state.viewport.spacePressed = true;
+    applyCanvasViewport();
+  });
+
+  window.addEventListener('keyup', function (event) {
+    if (event.code !== 'Space') return;
+    state.viewport.spacePressed = false;
+    state.viewport.isPanning = false;
+    applyCanvasViewport();
+  });
+}
+
+function capturePointer(pointerId) {
+  try {
+    els.canvasViewport.setPointerCapture(pointerId);
+  } catch (error) {
+    // Synthetic test events do not create an active browser pointer; real gestures do.
+  }
+}
+
+function canStartPan(event) {
+  if (event.button !== 0) return false;
+  if (isTypingTarget(event.target)) return false;
+  return true;
+}
+
+function isTypingTarget(target) {
+  return ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target?.tagName);
+}
+
+function getPointerDistance() {
+  const points = Array.from(state.viewport.pointers.values());
+  if (points.length < 2) return 0;
+  const dx = points[0].x - points[1].x;
+  const dy = points[0].y - points[1].y;
+  return Math.hypot(dx, dy);
+}
+
+function setCanvasZoom(value) {
+  state.viewport.zoom = clamp(value, 0.25, 4);
+  applyCanvasViewport();
+}
+
+function resetCanvasViewport(fitToStage) {
+  state.viewport.zoom = 1;
+  state.viewport.panX = 0;
+  state.viewport.panY = 0;
+  state.viewport.isPanning = false;
+  state.viewport.pointerId = null;
+  applyCanvasViewport();
+  els.exportStatus.textContent = fitToStage ? '画布已自适应视口。' : '画布已重置为 100%。';
+}
+
+function fitCanvasToViewport(silent) {
+  const inset = 48;
+  const viewportWidth = Math.max(1, els.canvasViewport.clientWidth - inset);
+  const viewportHeight = Math.max(1, els.canvasViewport.clientHeight - inset);
+  const canvasWidth = Math.max(1, els.previewCanvas.offsetWidth);
+  const canvasHeight = Math.max(1, els.previewCanvas.offsetHeight);
+  state.viewport.zoom = clamp(Math.min(viewportWidth / canvasWidth, viewportHeight / canvasHeight), 0.25, 4);
+  els.canvasViewport.classList.add('is-fitting');
+  state.viewport.panX = 0;
+  state.viewport.panY = 0;
+  state.viewport.isPanning = false;
+  state.viewport.pointerId = null;
+  applyCanvasViewport();
+  requestAnimationFrame(centerPreviewInViewport);
+  if (!silent) els.exportStatus.textContent = '画布已自适应视口。';
+}
+
+function centerPreviewInViewport() {
+  const previewRect = els.previewCanvas.getBoundingClientRect();
+  const viewportRect = els.canvasViewport.getBoundingClientRect();
+  const previewCenterX = previewRect.left + previewRect.width / 2;
+  const previewCenterY = previewRect.top + previewRect.height / 2;
+  const viewportCenterX = viewportRect.left + viewportRect.width / 2;
+  const viewportCenterY = viewportRect.top + viewportRect.height / 2;
+  const deltaX = viewportCenterX - previewCenterX;
+  const deltaY = viewportCenterY - previewCenterY;
+  if (Math.abs(deltaX) >= 0.5 || Math.abs(deltaY) >= 0.5) {
+    state.viewport.panX += deltaX;
+    state.viewport.panY += deltaY;
+    applyCanvasViewport();
+  }
+  requestAnimationFrame(function () {
+    els.canvasViewport.classList.remove('is-fitting');
+  });
+}
+
+function applyCanvasViewport() {
+  els.canvasTransform.style.setProperty('--canvas-zoom', state.viewport.zoom.toFixed(3));
+  els.canvasTransform.style.setProperty('--canvas-pan-x', Math.round(state.viewport.panX) + 'px');
+  els.canvasTransform.style.setProperty('--canvas-pan-y', Math.round(state.viewport.panY) + 'px');
+  els.zoomLevelButton.textContent = Math.round(state.viewport.zoom * 100) + '%';
+  els.canvasViewport.classList.toggle('is-panning', state.viewport.isPanning);
+  els.canvasViewport.classList.add('is-pannable');
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function renderPhotos() {
+  els.photoCount.textContent = state.photos.length + ' 张';
+  els.photoGrid.innerHTML = '';
+
+  if (!state.photos.length) {
+    els.photoGrid.className = 'photo-grid empty-state';
+    els.photoGrid.innerHTML = '<p>上传 1 到 9 张照片后，这里会显示主色调和 EXIF 信息。</p>';
+    return;
+  }
+
+  els.photoGrid.className = 'photo-grid';
+  state.photos.forEach(function (photo) {
+    const card = document.createElement('article');
+    card.className = 'photo-card';
+
+    const img = document.createElement('img');
+    img.src = photo.src;
+    img.alt = photo.fileName;
+
+    const chip = document.createElement('div');
+    chip.className = 'color-chip';
+    chip.style.background = photo.dominantColor.hex;
+    chip.style.color = getReadableTextColor(photo.dominantColor.hex);
+    chip.innerHTML = '<span>' + describeColor(photo.dominantColor.hex) + '</span><span>' + photo.dominantColor.hex.toUpperCase() + '</span>';
+
+    const remove = document.createElement('button');
+    remove.className = 'remove-photo';
+    remove.type = 'button';
+    remove.setAttribute('aria-label', '删除图片');
+    remove.textContent = '×';
+    remove.addEventListener('click', function () {
+      URL.revokeObjectURL(photo.src);
+      state.photos = state.photos.filter(function (item) { return item.id !== photo.id; });
+      state.copyDirty = false;
+      seedCopy();
+      renderAll();
+    });
+
+    card.append(img, chip, remove);
+    els.photoGrid.append(card);
+  });
+}
+
+function renderPalette() {
+  els.paletteStrip.innerHTML = '';
+  const colors = getPaletteColors();
+  const summary = buildPaletteSummary(colors);
+  els.averageColor.textContent = state.photos.length ? summary.average.hex.toUpperCase() : '等待图片';
+
+  colors.slice(0, 6).forEach(function (hex) {
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'palette-swatch';
+    swatch.style.background = hex;
+    swatch.style.color = getReadableTextColor(hex);
+    swatch.innerHTML = '<strong>' + describeColor(hex) + '</strong><span>' + hex.toUpperCase() + '</span>';
+    swatch.addEventListener('click', function () {
+      state.customColor = hex;
+      renderPreview();
+      els.exportStatus.textContent = hex.toUpperCase() + ' 已应用为预览强调色。';
+    });
+    els.paletteStrip.append(swatch);
+  });
+}
+
+function renderPreview() {
+  const layout = getSelectedLayout();
+  const previewColor = state.customColor || getMainColorHex() || '#2a4252';
+  const isBorderless = state.selectedLayout === 'movie-poster' && state.style.borderless;
+  const hasMoviePhoto = state.selectedLayout === 'movie-poster' && Boolean(state.photos[0]);
+  els.layoutHint.textContent = layout.label;
+  els.previewCanvas.className = 'collage-preview ' + layout.className + ' font-' + state.style.font + (isBorderless ? ' borderless' : '') + (hasMoviePhoto ? ' has-photo' : '');
+  els.previewCanvas.style.setProperty('--preview-color', previewColor);
+  els.previewCanvas.style.setProperty('--movie-text-color', getReadableTextColor(previewColor));
+  els.previewCanvas.style.setProperty('--movie-color-ratio', state.style.ratio + '%');
+  els.previewCanvas.style.setProperty('--poster-radius', state.style.radius + 'px');
+  els.previewCanvas.style.setProperty('--poster-padding', state.style.padding + 'px');
+  els.previewCanvas.style.setProperty('--poster-title-size', state.style.fontSize + 'px');
+  els.previewCanvas.style.setProperty('--movie-card-ratio', String(getMovieCardRatio()));
+  els.previewCanvas.innerHTML = '';
+
+  const inner = document.createElement('div');
+  inner.className = state.selectedLayout === 'movie-poster' ? 'movie-poster-inner' : 'preview-inner';
+  if (hasMoviePhoto) inner.classList.add('has-photo');
+
+  if (layout.id === 'movie-poster') {
+    renderMoviePoster(inner);
+    els.previewCanvas.append(inner);
+    return;
+  }
+
+  const meta = document.createElement('div');
+  meta.className = 'preview-meta';
+  meta.innerHTML = '<span>' + escapeHtml(getDisplayDate()) + '</span><span>' + escapeHtml(els.placeInput.value || '未设置地点') + '</span><span>' + escapeHtml(describeColor(getMainColorHex() || '#f05f87')) + '</span>';
+
+  const swatches = document.createElement('div');
+  swatches.className = 'preview-swatches';
+  getPaletteColors().slice(0, 6).forEach(function (hex) {
+    const swatch = document.createElement('div');
+    swatch.className = 'preview-swatch';
+    swatch.style.background = hex;
+    swatches.append(swatch);
+  });
+
+  const copy = document.createElement('div');
+  copy.className = 'preview-copy';
+  copy.innerHTML = '<h3>' + escapeHtml(els.titleInput.value || '一场 Color Walk') + '</h3><p>' + escapeHtml(els.bodyInput.value || '上传图片后生成拼贴文案。') + '</p><p>' + escapeHtml(els.tagsInput.value || '#ColorWalk') + '</p>';
+
+  if (layout.id === 'grid9') {
+    inner.append(createPreviewGallery(9), meta, swatches, copy);
+  } else if (layout.id === 'stacked') {
+    inner.append(createPreviewGallery(1), meta, swatches, copy);
+  } else if (layout.id === 'magazine') {
+    inner.append(createPreviewGallery(Math.min(Math.max(state.photos.length, 3), 4)), meta, swatches, copy);
+  } else {
+    inner.append(createPreviewGallery(1), meta, swatches, copy);
+  }
+
+  els.previewCanvas.append(inner);
+}
+
+function renderMoviePoster(inner) {
+  inner.classList.toggle('color-top', state.movieColorOnTop);
+  inner.classList.toggle('color-bottom', !state.movieColorOnTop);
+
+  const colorCard = document.createElement('section');
+  colorCard.className = 'movie-color-card';
+  const title = document.createElement('p');
+  title.className = 'movie-title';
+  title.textContent = els.titleInput.value || 'Meili Snow Mountain, Yunnan - 10:38 PM';
+  colorCard.append(title);
+
+  const image = createPreviewImage();
+  image.classList.add('movie-photo');
+
+  if (state.movieColorOnTop) inner.append(colorCard, image);
+  else inner.append(image, colorCard);
+}
+
+
+function createPreviewImage() {
+  const photo = state.photos[0];
+  const imageWrap = document.createElement('div');
+  imageWrap.className = 'preview-image';
+  if (photo) {
+    imageWrap.style.setProperty('--raw-ratio', String(photo.ratio));
+    imageWrap.dataset.rawRatio = String(photo.ratio);
+    const img = document.createElement('img');
+    img.src = photo.src;
+    img.alt = photo.fileName;
+    img.style.aspectRatio = photo.naturalWidth + ' / ' + photo.naturalHeight;
+    imageWrap.append(img);
+  } else {
+    imageWrap.innerHTML = '<span>上传图片</span>';
+  }
+  return imageWrap;
+}
+
+function createPreviewGallery(slots) {
+  const gallery = document.createElement('div');
+  gallery.className = 'preview-gallery';
+
+  for (let index = 0; index < slots; index += 1) {
+    const photo = state.photos[index % Math.max(state.photos.length, 1)];
+    const imageWrap = document.createElement('div');
+    imageWrap.className = 'preview-image';
+    if (photo) {
+      imageWrap.style.setProperty('--raw-ratio', String(photo.ratio));
+      imageWrap.dataset.rawRatio = String(photo.ratio);
+      const img = document.createElement('img');
+      img.src = photo.src;
+      img.alt = photo.fileName;
+      img.style.aspectRatio = photo.naturalWidth + ' / ' + photo.naturalHeight;
+      imageWrap.append(img);
+    } else {
+      imageWrap.innerHTML = '<span>上传图片</span>';
+    }
+    gallery.append(imageWrap);
+  }
+
+  return gallery;
+}
+
+function applyStyleControls() {
+  els.previewCanvas.style.setProperty('--poster-radius', state.style.radius + 'px');
+  els.previewCanvas.style.setProperty('--poster-padding', state.style.padding + 'px');
+  els.previewCanvas.style.setProperty('--poster-title-size', state.style.fontSize + 'px');
+  els.previewCanvas.style.setProperty('--movie-color-ratio', state.style.ratio + '%');
+  els.previewCanvas.style.setProperty('--movie-card-ratio', String(getMovieCardRatio()));
+  els.previewCanvas.classList.toggle('borderless', state.selectedLayout === 'movie-poster' && state.style.borderless);
+  els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
+  els.previewCanvas.classList.add('font-' + state.style.font);
+}
+
+function getMovieCardRatio() {
+  const photo = state.photos[0];
+  if (!photo) return 1;
+  const colorWeight = clamp(state.style.ratio, 1, 99);
+  const imageWeight = 100 - colorWeight;
+  return photo.ratio * (imageWeight / colorWeight);
+}
+
+function stashDraft() {
+  const draft = {
+    selectedLayout: state.selectedLayout,
+    activePanel: state.activePanel,
+    place: els.placeInput.value,
+    date: els.dateInput.value,
+    time: els.timeInput.value,
+    keyword: els.keywordInput.value,
+    copyStyle: els.copyStyleSelect.value,
+    title: els.titleInput.value,
+    body: els.bodyInput.value,
+    tags: els.tagsInput.value,
+    style: state.style,
+    customColor: state.customColor,
+    colors: getPaletteColors(),
+  };
+  localStorage.setItem('color-walk-draft', JSON.stringify(draft));
+  els.exportStatus.textContent = '已暂存当前布局、文案和样式。';
+}
+
+async function copyCurrentText() {
+  const text = [els.titleInput.value, els.bodyInput.value, els.tagsInput.value].filter(Boolean).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    els.exportStatus.textContent = '文案已复制。';
+  } catch (error) {
+    els.exportStatus.textContent = '复制失败，请手动选择文本复制。';
+  }
+}
+
+async function exportPng() {
+  if (!state.photos.length) {
+    els.exportStatus.textContent = '请先上传至少一张图片。';
+    return;
+  }
+
+  els.exportStatus.textContent = '正在生成 PNG...';
+  const canvas = els.exportCanvas;
+  canvas.width = 1080;
+  canvas.height = state.selectedLayout === 'movie-poster' ? getMoviePosterExportHeight(1080) : 1350;
+  const ctx = canvas.getContext('2d');
+  drawExport(ctx, canvas.width, canvas.height);
+
+  canvas.toBlob(function (blob) {
+    if (!blob) {
+      els.exportStatus.textContent = '导出失败，请再试一次。';
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'color-walk-collage.png';
+    link.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    els.exportStatus.textContent = '已导出 PNG。';
+  }, 'image/png', 0.95);
+}
+
+function getMoviePosterExportHeight(width) {
+  const photo = state.photos[0];
+  if (!photo) return 1920;
+  const margin = state.style.borderless ? 0 : 72;
+  const posterW = width - margin * 2;
+  const imageH = posterW / photo.ratio;
+  const colorH = imageH * (state.style.ratio / (100 - state.style.ratio));
+  return Math.ceil(imageH + colorH + margin * 2);
+}
+
+function drawExport(ctx, width, height) {
+  const layout = state.selectedLayout;
+  const mainColor = state.customColor || getMainColorHex() || '#2a4252';
+  ctx.clearRect(0, 0, width, height);
+
+  if (layout === 'movie-poster') {
+    drawExportMoviePoster(ctx, width, height, mainColor);
+    return;
+  }
+
+  ctx.fillStyle = layout === 'color-card-poster' ? mainColor : '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = layout === 'color-card-poster' ? 'rgba(255,255,255,0.92)' : '#191817';
+  ctx.font = '700 54px system-ui, sans-serif';
+  wrapText(ctx, els.titleInput.value || '一场 Color Walk', 72, 96, 936, 66, 2);
+
+  if (layout === 'grid9') drawExportGrid(ctx);
+  if (layout === 'stacked') drawExportStacked(ctx);
+  if (layout === 'magazine') drawExportMagazine(ctx);
+  if (layout === 'color-card-poster') drawExportPoster(ctx, mainColor);
+
+  drawExportText(ctx, layout === 'color-card-poster');
+}
+
+
+function drawExportMoviePoster(ctx, width, height, mainColor) {
+  const margin = state.style.borderless ? 0 : 72;
+  const posterX = margin;
+  const posterY = margin;
+  const posterW = width - margin * 2;
+  const posterH = height - margin * 2;
+  const photo = state.photos[0];
+  const imageH = photo ? Math.round(posterW / photo.ratio) : posterH - Math.round(posterH * (state.style.ratio / 100));
+  const colorH = photo ? posterH - imageH : Math.round(posterH * (state.style.ratio / 100));
+  const colorY = state.movieColorOnTop ? posterY : posterY + imageH;
+  const imageY = state.movieColorOnTop ? posterY + colorH : posterY;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = mainColor;
+  ctx.fillRect(posterX, colorY, posterW, colorH);
+
+  ctx.save();
+  if (photo) drawImageContain(ctx, photo.image, posterX, imageY, posterW, imageH, '#111a24');
+  else {
+    ctx.fillStyle = '#f3f4f6';
+    ctx.fillRect(posterX, imageY, posterW, imageH);
+  }
+  ctx.restore();
+
+  ctx.fillStyle = getReadableTextColor(mainColor);
+  ctx.font = `${Math.max(54, state.style.fontSize * 4)}px ${getExportFontFamily()}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  wrapCenteredText(ctx, els.titleInput.value || 'Meili Snow Mountain, Yunnan - 10:38 PM', posterX + posterW / 2, colorY + colorH / 2, posterW - 120, Math.max(68, state.style.fontSize * 4.8), 3);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawExportGrid(ctx) {
+  drawImageGrid(ctx, 72, 190, 936, 936, 3, 14);
+  drawPalette(ctx, 72, 1150, 936, 52);
+}
+
+function drawExportStacked(ctx) {
+  drawImageGrid(ctx, 72, 180, 936, 620, 1, 0);
+  drawPalette(ctx, 72, 832, 936, 68);
+}
+
+function drawExportMagazine(ctx) {
+  drawImageGrid(ctx, 72, 180, 590, 760, 1, 0);
+  drawImageGrid(ctx, 694, 180, 314, 360, 1, 0);
+  drawPalette(ctx, 694, 574, 314, 366, true);
+}
+
+function drawExportPoster(ctx, mainColor) {
+  ctx.fillStyle = '#ffffff';
+  roundedRect(ctx, 108, 190, 864, 680, 32);
+  ctx.fill();
+  drawImageGrid(ctx, 138, 220, 804, 620, 1, 0);
+  ctx.fillStyle = mainColor;
+  roundedRect(ctx, 108, 906, 864, 86, 24);
+  ctx.fill();
+  drawPalette(ctx, 140, 930, 800, 38);
+}
+
+function drawExportText(ctx, onTint) {
+  const y = state.selectedLayout === 'grid9' ? 1236 : 1048;
+  const bodyLines = state.selectedLayout === 'grid9' ? 2 : 3;
+  ctx.fillStyle = onTint ? 'rgba(255,255,255,0.92)' : '#191817';
+  ctx.font = '400 32px system-ui, sans-serif';
+  wrapText(ctx, els.bodyInput.value || '', 72, y, 936, 44, bodyLines);
+  ctx.fillStyle = onTint ? 'rgba(255,255,255,0.86)' : '#77736d';
+  ctx.font = '700 28px system-ui, sans-serif';
+  wrapText(ctx, els.tagsInput.value || '#ColorWalk', 72, 1300, 936, 38, 1);
+}
+
+function drawImageGrid(ctx, x, y, w, h, columns, gap) {
+  const count = columns === 3 ? 9 : Math.min(state.photos.length, columns * columns);
+  const rows = columns === 3 ? 3 : Math.max(1, Math.ceil(count / columns));
+  const cellW = (w - gap * (columns - 1)) / columns;
+  const cellH = columns === 1 ? h : (h - gap * (rows - 1)) / rows;
+
+  for (let index = 0; index < count; index += 1) {
+    const photo = state.photos[index % state.photos.length];
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const px = x + col * (cellW + gap);
+    const py = y + row * (cellH + gap);
+    ctx.save();
+    roundedClip(ctx, px, py, cellW, cellH, 24);
+    drawImageContain(ctx, photo.image, px, py, cellW, cellH, '#f3f4f6');
+    ctx.restore();
+    ctx.fillStyle = photo.dominantColor.hex;
+    ctx.fillRect(px, py + cellH - 18, cellW, 18);
+  }
+}
+
+function drawPalette(ctx, x, y, w, h, vertical) {
+  const colors = getPaletteColors();
+  const size = vertical ? h / colors.length : w / colors.length;
+  colors.forEach(function (hex, index) {
+    ctx.fillStyle = hex;
+    if (vertical) ctx.fillRect(x, y + index * size, w, size + 1);
+    else ctx.fillRect(x + index * size, y, size + 1, h);
+  });
+}
+
+function wrapCenteredText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const chars = String(text).split('');
+  const lines = [];
+  let line = '';
+  for (let index = 0; index < chars.length; index += 1) {
+    const testLine = line + chars[index];
+    if (ctx.measureText(testLine).width > maxWidth && line) {
+      lines.push(line);
+      line = chars[index];
+      if (lines.length >= maxLines) break;
+    } else {
+      line = testLine;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach(function (item, index) {
+    ctx.fillText(item, x, startY + index * lineHeight);
+  });
+}
+
+function getExportFontFamily() {
+  if (state.style.font === 'serif') return 'serif';
+  if (state.style.font === 'hand' || state.style.font === 'casual') return 'cursive';
+  return 'system-ui, sans-serif';
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const chars = String(text).split('');
+  let line = '';
+  let lines = 0;
+  for (let index = 0; index < chars.length; index += 1) {
+    const testLine = line + chars[index];
+    if (ctx.measureText(testLine).width > maxWidth && line) {
+      ctx.fillText(line, x, y + lines * lineHeight);
+      line = chars[index];
+      lines += 1;
+      if (lines >= maxLines) return;
+    } else {
+      line = testLine;
+    }
+  }
+  if (line && lines < maxLines) ctx.fillText(line, x, y + lines * lineHeight);
+}
+
+function roundedRect(ctx, x, y, w, h, radius) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+}
+
+function roundedClip(ctx, x, y, w, h, radius) {
+  roundedRect(ctx, x, y, w, h, radius);
+  ctx.clip();
+}
+
+function drawImageCover(ctx, image, x, y, w, h) {
+  const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
+  const sw = w / scale;
+  const sh = h / scale;
+  const sx = (image.naturalWidth - sw) / 2;
+  const sy = (image.naturalHeight - sh) / 2;
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, w, h);
+}
+
+function drawImageContain(ctx, image, x, y, w, h, background) {
+  ctx.fillStyle = background || '#f3f4f6';
+  ctx.fillRect(x, y, w, h);
+  const scale = Math.min(w / image.naturalWidth, h / image.naturalHeight);
+  const dw = image.naturalWidth * scale;
+  const dh = image.naturalHeight * scale;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) / 2;
+  ctx.drawImage(image, dx, dy, dw, dh);
+}
+
+function getSelectedLayout() {
+  return layoutDefinitions.find(function (layout) { return layout.id === state.selectedLayout; }) || layoutDefinitions[0];
+}
+
+function getPaletteColors() {
+  return state.photos.length ? state.photos.map(function (photo) { return photo.dominantColor.hex; }) : ['#f05f87', '#6aa9ff', '#82c784', '#f1c84b'];
+}
+
+function getMainColorHex() {
+  if (!state.photos.length) return '';
+  return buildPaletteSummary(state.photos.map(function (photo) { return photo.dominantColor.hex; })).average.hex;
+}
+
+function getDisplayDate() {
+  if (!els.dateInput.value) return '未设置日期';
+  const match = /^(?<year>\d{4})-(?<month>\d{1,2})-(?<day>\d{1,2})$/.exec(els.dateInput.value);
+  if (!match?.groups) return els.dateInput.value;
+  return Number(match.groups.month) + '月' + Number(match.groups.day) + '日';
+}
+
+function loadImage(src) {
+  return new Promise(function (resolve, reject) {
+    const image = new Image();
+    image.onload = function () { resolve(image); };
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function handleResetUpload() {
+  const shouldReset = !state.photos.length || window.confirm('重新上传会清空当前画布，继续吗？');
+  if (!shouldReset) return;
+  resetApp();
+  els.fileInput.click();
+}
+
+function resetApp() {
+  state.photos.forEach(function (photo) { URL.revokeObjectURL(photo.src); });
+  state.photos = [];
+  state.copyDirty = false;
+  state.customColor = '#2a4252';
+  state.movieColorOnTop = true;
+  state.viewport.zoom = 1;
+  state.viewport.panX = 0;
+  state.viewport.panY = 0;
+  state.viewport.isPanning = false;
+  state.viewport.pointerId = null;
+  state.selectedLayout = 'movie-poster';
+  state.activePanel = 'style';
+  els.placeInput.value = '';
+  els.dateInput.value = '';
+  els.keywordInput.value = '';
+  els.timeInput.value = '';
+  renderPanelTabs();
+  renderLayoutControls();
+  applyCanvasViewport();
+  seedCopy(true);
+  renderAll();
+  els.exportStatus.textContent = '';
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, function (char) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char];
+  });
+}
