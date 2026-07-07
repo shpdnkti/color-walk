@@ -121,7 +121,17 @@
                     <button class="ratio-preset" type="button" data-ratio="1:2">1:2</button>
                   </div>
                 </div>
-
+                <div class="ratio-control">
+                  <div class="ratio-control-header">
+                    <label for="ratioInput">色块比例</label>
+                    <button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button>
+                  </div>
+                  <input id="ratioInput" type="range" min="35" max="65" value="50" />
+                </div>
+                <label class="toggle-field">
+                  <span>边距切换 Border-less</span>
+                  <input id="borderlessInput" type="checkbox" checked />
+                </label>
                 <label>
                   圆角
                   <input id="radiusInput" type="range" min="0" max="32" value="0" />

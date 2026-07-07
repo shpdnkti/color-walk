@@ -8,6 +8,7 @@ export function serializeDraft(input = {}) {
     selectedLayout: input.selectedLayout || 'grid9',
     activePanel: input.activePanel || 'copy',
     customColor: input.customColor || '#2a4252',
+    movieColorOnTop: input.movieColorOnTop !== false,
     paletteOrder: normalizePaletteOrder(input.paletteOrder),
     paletteWeights: normalizePaletteWeights(input.paletteWeights),
     visionInsight: normalizeVisionInsight(input.visionInsight),
@@ -27,6 +28,7 @@ export function parseDraft(value) {
       selectedLayout: text(draft.selectedLayout) || 'grid9',
       activePanel: text(draft.activePanel) || 'copy',
       customColor: text(draft.customColor) || '#2a4252',
+      movieColorOnTop: draft.movieColorOnTop !== false,
       paletteOrder: normalizePaletteOrder(draft.paletteOrder),
       paletteWeights: normalizePaletteWeights(draft.paletteWeights),
       visionInsight: normalizeVisionInsight(draft.visionInsight),
@@ -71,7 +73,9 @@ function normalizeStyle(style = {}) {
     padding: number(style.padding, 0),
     fontSize: number(style.fontSize, 24),
     font: text(style.font) || 'system',
+    ratio: number(style.ratio, 50),
     outputRatio: text(style.outputRatio) || '3:4',
+    borderless: style.borderless !== false,
   };
 }
 
