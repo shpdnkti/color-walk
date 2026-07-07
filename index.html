@@ -138,7 +138,7 @@
       </section>
     </main>
 
-    <input id="fileInput" class="visually-hidden" type="file" accept="image/*" multiple />
+    <input id="fileInput" class="visually-hidden" type="file" accept="image/*,.heic,.heif,.hif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple />
     <canvas id="workCanvas" class="visually-hidden"></canvas>
     <canvas id="exportCanvas" class="visually-hidden" width="1080" height="1350"></canvas>
     <script>
@@ -160,6 +160,6 @@
         bindRangeValueOutputs();
       }());
     </script>
-    <script type="module" src="src/app.js?v=20260707-ratio-refit"></script>
+    <script type="module" src="src/app.js?v=20260707-ratio-drag"></script>
   </body>
 </html>

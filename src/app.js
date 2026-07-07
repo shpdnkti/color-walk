@@ -1,6 +1,8 @@
 import { buildPaletteSummary, findDominantColor, getReadableTextColor } from './color.js';
 import { parseDraft, serializeDraft } from './draft.js';
 import { extractPhotoMetadata } from './exif.js';
+import { clampCoverTransform } from './transform.js?v=20260707-ratio-drag';
+import { buildUploadStatusMessage, convertHeicToJpeg, normalizeUploadFile } from './upload.js?v=20260707-heic-fallback';
 import { buildReverseGeocodeUrl, formatReverseGeocodeLabel } from './geocode.js';
 import {
   describeColor,
@@ -221,37 +223,56 @@ async function handleFiles(event) {
   if (!files.length) return;
   els.exportStatus.textContent = '正在识别图片主色和照片信息...';
 
-  const loaded = await Promise.all(files.map(createPhotoItem));
-  state.photos.push(...loaded.filter(Boolean));
-  await hydrateLocationLabels(loaded.filter(Boolean));
+  const results = await Promise.all(files.map(createPhotoItem));
+  const loaded = results.filter(isLoadedPhotoItem);
+  const failed = results.filter(function (result) { return result && result.ok === false; }).length;
+
+  if (!loaded.length) {
+    els.exportStatus.textContent = buildUploadStatusMessage({ loaded: 0, failed });
+    event.target.value = '';
+    return;
+  }
+
+  state.photos.push(...loaded);
+  await hydrateLocationLabels(loaded);
   state.customColor = getMainColorHex() || state.customColor;
   state.copyDirty = false;
   seedCoverText();
   renderAll();
-  els.exportStatus.textContent = '已完成识别，可以继续调整文本和结构。';
+  els.exportStatus.textContent = buildUploadStatusMessage({ loaded: loaded.length, failed });
   requestAnimationFrame(function () { fitCanvasToViewport(true); });
   event.target.value = '';
 }
 
 async function createPhotoItem(file) {
-  const dataUrl = await fileToDataUrl(file);
-  const image = await loadImage(dataUrl);
-  const dominant = extractDominantColor(image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
-  const metadata = await extractPhotoMetadata(file);
+  const normalized = await normalizeUploadFile(file, {
+    readAsDataUrl: fileToDataUrl,
+    loadImage,
+    extractMetadata: extractPhotoMetadata,
+    convertHeicToJpeg,
+  });
+  if (!normalized.ok) return normalized;
+
+  const dominant = extractDominantColor(normalized.image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
 
   return {
     id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
-    fileName: file.name,
-    src: dataUrl,
-    dataUrl,
-    image,
+    fileName: normalized.fileName,
+    src: normalized.src,
+    dataUrl: normalized.dataUrl,
+    image: normalized.image,
     dominantColor: dominant,
     textColor: getReadableTextColor(dominant.hex),
-    metadata,
-    naturalWidth: image.naturalWidth,
-    naturalHeight: image.naturalHeight,
-    ratio: image.naturalWidth / image.naturalHeight,
+    metadata: normalized.metadata,
+    naturalWidth: normalized.naturalWidth,
+    naturalHeight: normalized.naturalHeight,
+    ratio: normalized.ratio,
+    convertedFromHeic: normalized.convertedFromHeic,
   };
+}
+
+function isLoadedPhotoItem(item) {
+  return item && item.ok !== false && item.image;
 }
 
 function extractDominantColor(image) {
@@ -1266,7 +1287,7 @@ function bindImageTransformEvents(imageWrap, photo) {
       scale: transform.scale + delta,
       x: transform.x,
       y: transform.y,
-    });
+    }, imageWrap);
     applyPhotoTransformToElement(imageWrap, photo.id);
     els.exportStatus.textContent = '图片焦点缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
   }, { passive: false });
@@ -1298,7 +1319,7 @@ function bindImageTransformEvents(imageWrap, photo) {
         scale: state.imageGesture.pinchStartScale * (distance / state.imageGesture.pinchStartDistance),
         x: transform.x,
         y: transform.y,
-      });
+      }, imageWrap);
       applyPhotoTransformToElement(imageWrap, photo.id);
       return;
     }
@@ -1313,7 +1334,7 @@ function bindImageTransformEvents(imageWrap, photo) {
       scale: transform.scale,
       x: transform.x + dx,
       y: transform.y + dy,
-    });
+    }, imageWrap);
     state.imageGesture.lastX = event.clientX;
     state.imageGesture.lastY = event.clientY;
     applyPhotoTransformToElement(imageWrap, photo.id);
@@ -1359,8 +1380,8 @@ function getPhotoTransform(photoId) {
   return state.photoTransforms.get(photoId) || { scale: 1, x: 0, y: 0 };
 }
 
-function setPhotoTransform(photoId, transform) {
-  state.photoTransforms.set(photoId, clampPhotoTransform(transform));
+function setPhotoTransform(photoId, transform, element) {
+  state.photoTransforms.set(photoId, clampPhotoTransform(photoId, transform, element));
   applyPhotoTransformToPreviewInstances(photoId);
   syncPhotoCropControls(photoId);
   scheduleDraftSave();
@@ -1397,14 +1418,24 @@ function applyPhotoTransformToElement(element, photoId) {
   element.style.setProperty('--image-translate-y', offsetY + 'px');
 }
 
-function clampPhotoTransform(transform) {
-  const scale = clamp(transform.scale || 1, 1, 4);
-  const maxOffset = scale <= 1 ? 0 : Math.min(0.48, (scale - 1) / (scale * 2) + 0.08);
-  return {
-    scale,
-    x: scale <= 1 ? 0 : clamp(transform.x || 0, -maxOffset, maxOffset),
-    y: scale <= 1 ? 0 : clamp(transform.y || 0, -maxOffset, maxOffset),
-  };
+function clampPhotoTransform(photoId, transform, element) {
+  const photo = getPhotoById(photoId);
+  return clampCoverTransform(transform, {
+    imageRatio: photo?.ratio || 1,
+    frameRatio: getPhotoFrameRatio(photoId, element),
+  });
+}
+
+function getPhotoById(photoId) {
+  return state.photos.find(function (photo) { return photo.id === photoId; }) || null;
+}
+
+function getPhotoFrameRatio(photoId, element) {
+  const frame = element || els.previewCanvas.querySelector('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]');
+  const width = Number(frame?.clientWidth) || 0;
+  const height = Number(frame?.clientHeight) || 0;
+  if (width > 0 && height > 0) return width / height;
+  return getPhotoById(photoId)?.ratio || 1;
 }
 
 function cssEscape(value) {
