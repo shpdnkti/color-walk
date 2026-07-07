@@ -15,6 +15,7 @@
         </div>
         <div class="header-actions">
           <button class="header-button stash-action" id="stashButton" type="button"><span class="icon icon-save" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8"/><path d="M8 17h8"/></svg></span><span>暂存</span></button>
+          <button class="header-button clear-draft-action" id="clearDraftButton" type="button" aria-label="清除本地草稿" title="清除本地草稿"><span class="icon icon-trash" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v5"/><path d="M14 11v5"/></svg></span><span>清除草稿</span></button>
           <button class="header-button primary-action" id="exportButton" type="button"><span class="icon icon-export" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg></span><span>导出图片</span></button>
         </div>
       </header>
@@ -51,7 +52,7 @@
             <section class="panel-page" data-panel="layout" aria-label="布局设置">
               <div class="panel-title">
                 <h2>拼贴结构</h2>
-                <span>5 模板</span>
+                <span>4 模板</span>
               </div>
               <div id="layoutControls" class="layout-rail" role="listbox" aria-label="拼贴布局"></div>
             </section>
@@ -71,8 +72,11 @@
 
             <section class="panel-page" data-panel="copy" aria-label="Color Walk 文字设置">
               <div class="panel-title">
-                <h2>封面文字</h2>
-                <button id="copyGenerateButton" class="text-button" type="button">生成封面文字</button>
+<h2>封面文字</h2>
+                <div class="panel-title-actions">
+                  <button id="aiAnalyzeButton" class="text-button compact-text-button" type="button">AI识图</button>
+                  <button id="copyGenerateButton" class="text-button compact-text-button" type="button">生成封面文字</button>
+                </div>
               </div>
               <div class="copy-controls">
                 <label>
@@ -81,8 +85,8 @@
                 </label>
                 <div class="field-grid typography-fields">
                   <label>
-                    字号
-                    <input id="fontSizeInput" type="range" min="16" max="30" value="24" />
+                    <span class="range-field-header"><span>字号</span><output id="fontSizeValue" class="range-value" for="fontSizeInput">24px</output></span>
+                    <input id="fontSizeInput" type="range" min="16" max="30" value="24" data-range-output="#fontSizeValue" data-range-unit="px" />
                   </label>
                   <label>
                     字体
@@ -117,6 +121,7 @@
                     <button class="ratio-preset" type="button" data-ratio="1:2">1:2</button>
                   </div>
                 </div>
+
                 <label>
                   圆角
                   <input id="radiusInput" type="range" min="0" max="32" value="0" />
@@ -135,6 +140,25 @@
     <input id="fileInput" class="visually-hidden" type="file" accept="image/*" multiple />
     <canvas id="workCanvas" class="visually-hidden"></canvas>
     <canvas id="exportCanvas" class="visually-hidden" width="1080" height="1350"></canvas>
-    <script type="module" src="src/app.js"></script>
+    <script>
+      (function () {
+        function bindRangeValueOutputs() {
+          document.querySelectorAll('[data-range-output]').forEach(function (input) {
+            const output = document.querySelector(input.dataset.rangeOutput);
+            const unit = input.dataset.rangeUnit || '';
+            if (!output) return;
+            const sync = function () {
+              output.textContent = input.value + unit;
+            };
+            input.addEventListener('input', sync);
+            input.addEventListener('change', sync);
+            sync();
+          });
+        }
+
+        bindRangeValueOutputs();
+      }());
+    </script>
+    <script type="module" src="src/app.js?v=20260706-slider-values-live"></script>
   </body>
 </html>

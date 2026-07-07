@@ -1,11 +1,18 @@
 import { buildPaletteSummary, findDominantColor, getReadableTextColor } from './color.js';
+import { parseDraft, serializeDraft } from './draft.js';
 import { extractPhotoMetadata } from './exif.js';
+import { buildReverseGeocodeUrl, formatReverseGeocodeLabel } from './geocode.js';
 import {
   describeColor,
   generateCoverText,
   layoutDefinitions,
   panelDefinitions,
 } from './templates.js';
+
+const DRAFT_STORAGE_KEY = 'color-walk-draft';
+const GEOCODE_CACHE_KEY = 'color-walk-geocode-cache';
+const DIRECT_NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
+let draftSaveTimer = 0;
 
 const outputRatioConfig = {
   ratioPresets: [
@@ -24,6 +31,13 @@ const state = {
   customColor: '#2a4252',
   copyDirty: false,
   locationCache: new Map(),
+  restoringDraft: false,
+  draggedPhotoId: null,
+  draggedColorIndex: null,
+  paletteOrder: [],
+  paletteWeights: {},
+  visionInsight: null,
+
   photoTransforms: new Map(),
   imageGesture: {
     activePhotoId: null,
@@ -60,6 +74,8 @@ const els = {
   fileInput: document.querySelector('#fileInput'),
   resetButton: document.querySelector('#resetButton'),
   stashButton: document.querySelector('#stashButton'),
+  clearDraftButton: document.querySelector('#clearDraftButton'),
+
   photoGrid: document.querySelector('#photoGrid'),
   photoCount: document.querySelector('#photoCount'),
   paletteStrip: document.querySelector('#paletteStrip'),
@@ -68,6 +84,7 @@ const els = {
   layoutHint: document.querySelector('#layoutHint'),
   panelTabBar: document.querySelector('#panelTabBar'),
   panelContent: document.querySelector('#panelContent'),
+  aiAnalyzeButton: document.querySelector('#aiAnalyzeButton'),
   copyGenerateButton: document.querySelector('#copyGenerateButton'),
   copyTextButton: document.querySelector('#copyTextButton'),
   customColorButton: document.querySelector('#customColorButton'),
@@ -75,9 +92,11 @@ const els = {
   coverTextInput: document.querySelector('#coverTextInput'),
   radiusInput: document.querySelector('#radiusInput'),
   paddingInput: document.querySelector('#paddingInput'),
+
   ratioPresetBar: document.querySelector('#ratioPresetBar'),
   ratioResolution: document.querySelector('#ratioResolution'),
   fontSizeInput: document.querySelector('#fontSizeInput'),
+  fontSizeValue: document.querySelector('#fontSizeValue'),
   fontSelect: document.querySelector('#fontSelect'),
   canvasViewport: document.querySelector('#canvasViewport'),
   canvasTransform: document.querySelector('#canvasTransform'),
@@ -94,21 +113,26 @@ const els = {
 
 init();
 
-function init() {
+async function init() {
   renderPanelTabs();
   renderLayoutControls();
   renderRatioPresets();
   bindEvents();
   applyStyleControls();
   applyCanvasViewport();
-  seedCoverText(true);
+  const restored = await restoreDraft();
+  if (!restored) seedCoverText(true);
+
   renderAll();
+  if (restored) els.exportStatus.textContent = '已恢复上次草稿。';
 }
 
 function bindEvents() {
   els.fileInput.addEventListener('change', handleFiles);
   els.resetButton.addEventListener('click', handleResetUpload);
   els.stashButton.addEventListener('click', stashDraft);
+  els.clearDraftButton.addEventListener('click', clearSavedDraft);
+  els.aiAnalyzeButton.addEventListener('click', analyzePhotosWithAI);
   els.copyGenerateButton.addEventListener('click', function () {
     state.copyDirty = false;
     seedCoverText(true);
@@ -138,19 +162,24 @@ function bindEvents() {
   });
 
   [els.radiusInput, els.paddingInput, els.fontSizeInput].forEach(function (input) {
-    input.addEventListener('input', function () {
-      state.style.radius = Number(els.radiusInput.value);
-      state.style.padding = Number(els.paddingInput.value);
-      state.style.fontSize = Number(els.fontSizeInput.value);
-      applyStyleControls();
-    });
+    input.addEventListener('input', handleStyleRangeInput);
+    input.addEventListener('change', handleStyleRangeInput);
   });
+
 
   els.fontSelect.addEventListener('input', function () {
     state.style.font = els.fontSelect.value;
     applyStyleControls();
   });
 }
+
+function handleStyleRangeInput() {
+  state.style.radius = Number(els.radiusInput.value);
+  state.style.padding = Number(els.paddingInput.value);
+  state.style.fontSize = Number(els.fontSizeInput.value);
+  applyStyleControls();
+}
+
 
 async function handleFiles(event) {
   const files = Array.from(event.target.files || []).slice(0, 9 - state.photos.length);
@@ -170,15 +199,16 @@ async function handleFiles(event) {
 }
 
 async function createPhotoItem(file) {
-  const src = URL.createObjectURL(file);
-  const image = await loadImage(src);
+  const dataUrl = await fileToDataUrl(file);
+  const image = await loadImage(dataUrl);
   const dominant = extractDominantColor(image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
   const metadata = await extractPhotoMetadata(file);
 
   return {
     id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
     fileName: file.name,
-    src,
+    src: dataUrl,
+    dataUrl,
     image,
     dominantColor: dominant,
     textColor: getReadableTextColor(dominant.hex),
@@ -207,34 +237,187 @@ function extractDominantColor(image) {
 }
 
 async function hydrateLocationLabels(photos) {
-  await Promise.all(photos.map(resolvePhotoLocation));
+  await Promise.all(photos.map(reverseGeocodePhoto));
 }
 
-async function resolvePhotoLocation(photo) {
-  const metadata = photo?.metadata || {};
-  if (!Number.isFinite(metadata.latitude) || !Number.isFinite(metadata.longitude)) return;
-  const cacheKey = metadata.latitude.toFixed(4) + ',' + metadata.longitude.toFixed(4);
+async function reverseGeocodePhoto(photo) {
+  const latitude = photo?.metadata?.latitude;
+  const longitude = photo?.metadata?.longitude;
+  if (latitude === null || latitude === undefined || longitude === null || longitude === undefined) return;
+
+  const cacheKey = Number(latitude).toFixed(5) + ',' + Number(longitude).toFixed(5);
   if (state.locationCache.has(cacheKey)) {
-    photo.locationLabel = state.locationCache.get(cacheKey);
+    applyReverseGeocodeLabel(state.locationCache.get(cacheKey), photo, false);
     return;
   }
 
+  const cache = readGeocodeCache();
+  if (cache[cacheKey]) {
+    state.locationCache.set(cacheKey, cache[cacheKey]);
+    applyReverseGeocodeLabel(cache[cacheKey], photo, false);
+    return;
+  }
+
+  const endpoints = getReverseGeocodeEndpoints(latitude, longitude);
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const label = data.label || formatReverseGeocodeLabel(data);
+      if (!label) continue;
+      state.locationCache.set(cacheKey, label);
+      cache[cacheKey] = label;
+      writeGeocodeCache(cache);
+      applyReverseGeocodeLabel(label, photo, true);
+      return;
+    } catch (error) {
+      // Try the next configured endpoint; the coordinate label remains usable offline.
+    }
+  }
+  els.exportStatus.textContent = '无法反查地点，请检查网络或稍后重试。';
+}
+
+function applyReverseGeocodeLabel(label, photo, showStatus) {
+  photo.locationLabel = label;
+  photo.metadata.placeLabel = label;
+  if (!state.copyDirty) {
+    seedCoverText();
+    renderPreview();
+  }
+  if (showStatus) els.exportStatus.textContent = '已反查地点：' + label + '。地点数据来自 OpenStreetMap/Nominatim。';
+}
+
+function getReverseGeocodeEndpoints(latitude, longitude) {
+  const customEndpoint = window.COLOR_WALK_CONFIG?.reverseGeocodeEndpoint || '';
+  const endpoints = [];
+  if (customEndpoint) endpoints.push(buildReverseGeocodeUrl(customEndpoint, latitude, longitude));
+  endpoints.push(buildReverseGeocodeUrl('/api/reverse-geocode', latitude, longitude));
+
+  const directUrl = new URL(DIRECT_NOMINATIM_ENDPOINT);
+  directUrl.searchParams.set('format', 'jsonv2');
+  directUrl.searchParams.set('addressdetails', '1');
+  directUrl.searchParams.set('namedetails', '1');
+  directUrl.searchParams.set('zoom', '17');
+  directUrl.searchParams.set('layer', 'address,poi');
+  directUrl.searchParams.set('accept-language', 'zh-CN');
+  directUrl.searchParams.set('lat', String(latitude));
+  directUrl.searchParams.set('lon', String(longitude));
+  endpoints.push(directUrl.toString());
+  return endpoints.filter(Boolean);
+}
+
+function readGeocodeCache() {
   try {
-    const response = await fetch('/api/resolve-location', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ latitude: metadata.latitude, longitude: metadata.longitude }),
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    const label = typeof data.label === 'string' ? data.label.trim() : '';
-    if (!label || data.confidence === 'low') return;
-    state.locationCache.set(cacheKey, label);
-    photo.locationLabel = label;
+    return JSON.parse(localStorage.getItem(GEOCODE_CACHE_KEY) || '{}') || {};
   } catch {
-    // Location lookup is a convenience layer; EXIF-based text should still render.
+    return {};
   }
 }
+
+function writeGeocodeCache(cache) {
+  try {
+    localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Cache misses are acceptable; reverse geocoding still works when online.
+  }
+}
+
+async function analyzePhotosWithAI() {
+  if (!state.photos.length) {
+    els.exportStatus.textContent = '请先上传图片，再使用 AI 识图。';
+    return;
+  }
+
+  els.aiAnalyzeButton.disabled = true;
+  els.exportStatus.textContent = 'AI 正在识别图片内容...';
+  try {
+    const metadata = getPrimaryMetadata();
+    const response = await fetch('/api/analyze-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        images: state.photos.slice(0, 4).map(function (photo) {
+          return {
+            dataUrl: photo.dataUrl || photo.src,
+            fileName: photo.fileName,
+          };
+        }),
+        context: {
+          coverText: els.coverTextInput.value,
+          location: getPrimaryLocationLabel(),
+          date: metadata.displayDate || metadata.date || '',
+        },
+      }),
+    });
+
+    const payload = await response.json().catch(function () { return {}; });
+    if (!response.ok) {
+      const reason = payload.code || payload.error || 'analyze_failed';
+      throw new Error(reason);
+    }
+
+    applyVisionInsight(payload.insight || {});
+  } catch (error) {
+    els.exportStatus.textContent = getAiErrorMessage(error);
+  } finally {
+    els.aiAnalyzeButton.disabled = false;
+  }
+}
+
+function getAiErrorMessage(error) {
+  if (error?.message === 'openai_api_key_missing') return 'AI 识图暂时不可用：缺少 OpenAI API Key。';
+  if (error?.message === 'insufficient_quota') return 'AI 识图暂时不可用：OpenAI 额度不足。';
+  return 'AI 识图失败，请稍后再试或继续手动输入。';
+}
+
+function applyVisionInsight(insight) {
+  const normalized = normalizeClientVisionInsight(insight);
+  state.visionInsight = normalized;
+  state.copyDirty = false;
+
+  const generated = generateCoverText({
+    dominantColor: getMainColorHex() || '#f05f87',
+    paletteColors: getPaletteColors(),
+    locationLabel: getPrimaryLocationLabel(),
+    metadata: getPrimaryMetadata(),
+  });
+  const highlights = normalized.keywords.concat(normalized.subjects).slice(0, 4).join(' / ');
+  const aiLines = [
+    normalized.scene,
+    normalized.mood,
+    highlights ? 'AI识图：' + highlights : '',
+    normalized.description,
+  ].filter(Boolean);
+  els.coverTextInput.value = [generated].concat(aiLines).filter(Boolean).join('\n');
+
+  renderPreview();
+  scheduleDraftSave();
+  const visibleKeywords = normalized.keywords.slice(0, 4).join('、') || normalized.scene || '图片内容';
+  els.exportStatus.textContent = 'AI 已识别：' + visibleKeywords + '。';
+}
+
+function normalizeClientVisionInsight(insight = {}) {
+  return {
+    keywords: normalizeTextList(insight.keywords, 8),
+    subjects: normalizeTextList(insight.subjects, 6),
+    scene: cleanPlainText(insight.scene).slice(0, 40),
+    mood: cleanPlainText(insight.mood).slice(0, 32),
+    description: cleanPlainText(insight.description).slice(0, 140),
+    tags: normalizeTextList(insight.tags, 8),
+  };
+}
+
+function normalizeTextList(value, limit) {
+  return Array.isArray(value)
+    ? value.map(cleanPlainText).filter(Boolean).filter(function (item, index, list) { return list.indexOf(item) === index; }).slice(0, limit)
+    : [];
+}
+
+function cleanPlainText(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+}
+
 
 function seedCoverText(force) {
   if (!force && els.coverTextInput.value && state.copyDirty) return;
@@ -558,6 +741,31 @@ function renderPhotos() {
   state.photos.forEach(function (photo) {
     const card = document.createElement('article');
     card.className = 'photo-card';
+    card.dataset.photoId = photo.id;
+    card.draggable = true;
+    card.addEventListener('dragstart', function (event) {
+      state.draggedPhotoId = photo.id;
+      card.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', photo.id);
+    });
+    card.addEventListener('dragend', function () {
+      state.draggedPhotoId = null;
+      card.classList.remove('is-dragging');
+    });
+    card.addEventListener('dragover', function (event) {
+      if (!state.draggedPhotoId || state.draggedPhotoId === photo.id) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    card.addEventListener('drop', function (event) {
+      event.preventDefault();
+      const draggedId = event.dataTransfer.getData('text/plain') || state.draggedPhotoId;
+      movePhoto(draggedId, photo.id);
+    });
+
+    const thumb = document.createElement('div');
+    thumb.className = 'photo-thumb';
 
     const img = document.createElement('img');
     img.src = photo.src;
@@ -575,7 +783,7 @@ function renderPhotos() {
     remove.setAttribute('aria-label', '删除图片');
     remove.textContent = '×';
     remove.addEventListener('click', function () {
-      URL.revokeObjectURL(photo.src);
+      revokePhotoUrl(photo);
       state.photoTransforms.delete(photo.id);
       state.photos = state.photos.filter(function (item) { return item.id !== photo.id; });
       state.copyDirty = false;
@@ -583,9 +791,119 @@ function renderPhotos() {
       renderAll();
     });
 
-    card.append(img, chip, remove);
+    thumb.append(img, chip, remove);
+    card.append(thumb, createPhotoCropControls(photo));
     els.photoGrid.append(card);
   });
+}
+
+function createPhotoCropControls(photo) {
+  const controls = document.createElement('div');
+  controls.className = 'photo-crop-controls';
+  controls.dataset.photoId = photo.id;
+  controls.setAttribute('aria-label', '调整 ' + photo.fileName + ' 裁切');
+  controls.addEventListener('pointerdown', stopPhotoCardControlEvent);
+  controls.addEventListener('dragstart', stopPhotoCardControlEvent);
+
+  const field = document.createElement('label');
+  field.className = 'photo-crop-field';
+  const labelRow = document.createElement('span');
+  labelRow.className = 'photo-crop-label';
+  const labelText = document.createElement('span');
+  labelText.textContent = '裁切';
+  const value = document.createElement('output');
+  value.className = 'photo-crop-value';
+  labelRow.append(labelText, value);
+
+  const slider = document.createElement('input');
+  slider.className = 'photo-crop-slider';
+  slider.type = 'range';
+  slider.min = '100';
+  slider.max = '400';
+  slider.step = '5';
+  slider.setAttribute('aria-label', '调整 ' + photo.fileName + ' 裁切缩放');
+  slider.addEventListener('input', function (event) {
+    event.stopPropagation();
+    setPhotoCropScale(photo.id, Number(slider.value) / 100);
+    els.exportStatus.textContent = '图片裁切缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+  });
+  field.append(labelRow, slider);
+
+  controls.append(
+    field,
+    createPhotoCropButton(photo, 'zoom-out', '−', '缩小 ' + photo.fileName + ' 裁切'),
+    createPhotoCropButton(photo, 'zoom-in', '+', '放大 ' + photo.fileName + ' 裁切'),
+    createPhotoCropButton(photo, 'reset', '↺', '重置 ' + photo.fileName + ' 裁切'),
+  );
+  updatePhotoCropControls(controls, photo.id);
+  return controls;
+}
+
+function createPhotoCropButton(photo, action, label, ariaLabel) {
+  const button = document.createElement('button');
+  button.className = 'photo-crop-button';
+  button.type = 'button';
+  button.textContent = label;
+  button.setAttribute('data-crop-action', action);
+  button.setAttribute('aria-label', ariaLabel);
+  button.addEventListener('click', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const transform = getPhotoTransform(photo.id);
+    if (action === 'zoom-out') setPhotoCropScale(photo.id, transform.scale - 0.1);
+    if (action === 'zoom-in') setPhotoCropScale(photo.id, transform.scale + 0.1);
+    if (action === 'reset') resetPhotoTransform(photo.id);
+    els.exportStatus.textContent = action === 'reset'
+      ? '图片裁切已重置。'
+      : '图片裁切缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+  });
+  return button;
+}
+
+function stopPhotoCardControlEvent(event) {
+  event.stopPropagation();
+}
+
+function updatePhotoCropControls(controls, photoId) {
+  const transform = getPhotoTransform(photoId);
+  const percent = Math.round(transform.scale * 100);
+  const slider = controls.querySelector('.photo-crop-slider');
+  const value = controls.querySelector('.photo-crop-value');
+  const zoomOut = controls.querySelector('[data-crop-action="zoom-out"]');
+  const reset = controls.querySelector('[data-crop-action="reset"]');
+  if (slider) slider.value = String(percent);
+  if (value) value.textContent = percent + '%';
+  if (zoomOut) zoomOut.disabled = percent <= 100;
+  if (reset) reset.disabled = percent <= 100 && transform.x === 0 && transform.y === 0;
+}
+
+function syncPhotoCropControls(photoId) {
+  els.photoGrid.querySelectorAll('.photo-crop-controls[data-photo-id="' + cssEscape(photoId) + '"]').forEach(function (controls) {
+    updatePhotoCropControls(controls, photoId);
+  });
+}
+
+function movePhoto(sourceId, targetId) {
+  if (!sourceId || !targetId || sourceId === targetId) return;
+  const sourceIndex = state.photos.findIndex(function (photo) { return photo.id === sourceId; });
+  const targetIndex = state.photos.findIndex(function (photo) { return photo.id === targetId; });
+  if (sourceIndex === -1 || targetIndex === -1) return;
+  const moved = state.photos.splice(sourceIndex, 1)[0];
+  state.photos.splice(targetIndex, 0, moved);
+  renderAll();
+  els.exportStatus.textContent = '图片顺序已更新。';
+}
+
+function movePaletteColor(sourceIndex, targetIndex) {
+  const from = Number(sourceIndex);
+  const to = Number(targetIndex);
+  const colors = getPaletteColors();
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= colors.length || to >= colors.length) return;
+  const moved = colors.splice(from, 1)[0];
+  colors.splice(to, 0, moved);
+  state.paletteOrder = colors.map(normalizeHexColor).filter(Boolean);
+  renderAll();
+  els.exportStatus.textContent = '色块顺序已更新。';
 }
 
 function renderPalette() {
@@ -594,20 +912,95 @@ function renderPalette() {
   const summary = buildPaletteSummary(colors);
   els.averageColor.textContent = state.photos.length ? summary.average.hex.toUpperCase() : '等待图片';
 
-  colors.slice(0, 6).forEach(function (hex) {
+  colors.slice(0, 6).forEach(function (hex, index) {
+    const item = document.createElement('div');
+    item.className = 'palette-swatch-item';
+
     const swatch = document.createElement('button');
     swatch.type = 'button';
     swatch.className = 'palette-swatch';
+    swatch.draggable = true;
+    swatch.dataset.paletteIndex = String(index);
+    swatch.setAttribute('aria-label', '拖拽调整色块位置，点击应用 ' + hex.toUpperCase());
     swatch.style.background = hex;
     swatch.style.color = getReadableTextColor(hex);
+    swatch.style.flexGrow = String(getPaletteColorWeight(hex));
     swatch.innerHTML = '<strong>' + describeColor(hex) + '</strong><span>' + hex.toUpperCase() + '</span>';
+    swatch.addEventListener('dragstart', function (event) {
+      state.draggedColorIndex = index;
+      swatch.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(index));
+    });
+    swatch.addEventListener('dragend', function () {
+      state.draggedColorIndex = null;
+      swatch.classList.remove('is-dragging');
+    });
+    swatch.addEventListener('dragover', function (event) {
+      if (state.draggedColorIndex === null || state.draggedColorIndex === index) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    swatch.addEventListener('drop', function (event) {
+      event.preventDefault();
+      const draggedIndex = event.dataTransfer.getData('text/plain') || state.draggedColorIndex;
+      movePaletteColor(draggedIndex, index);
+    });
     swatch.addEventListener('click', function () {
       state.customColor = hex;
       renderPreview();
       els.exportStatus.textContent = hex.toUpperCase() + ' 已应用为预览强调色。';
     });
-    els.paletteStrip.append(swatch);
+
+    item.append(swatch, createPaletteSizeControls(hex));
+    els.paletteStrip.append(item);
   });
+}
+
+function createPaletteSizeControls(hex) {
+  const controls = document.createElement('div');
+  controls.className = 'palette-size-controls';
+  controls.setAttribute('aria-label', '调整 ' + hex.toUpperCase() + ' 色块尺寸');
+  controls.append(
+    createPaletteSizeButton(hex, 'smaller', '-', '缩小 ' + hex.toUpperCase() + ' 色块'),
+    createPaletteSizeButton(hex, 'larger', '+', '放大 ' + hex.toUpperCase() + ' 色块'),
+    createPaletteSizeButton(hex, 'reset', '1:1', '重置 ' + hex.toUpperCase() + ' 色块尺寸'),
+  );
+  return controls;
+}
+
+function createPaletteSizeButton(hex, action, label, ariaLabel) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'palette-size-button';
+  button.textContent = label;
+  button.setAttribute('data-palette-size-action', action);
+  button.setAttribute('aria-label', ariaLabel);
+  button.addEventListener('click', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = getPaletteColorWeight(hex);
+    if (action === 'smaller') setPaletteColorWeight(hex, current - 0.2);
+    if (action === 'larger') setPaletteColorWeight(hex, current + 0.2);
+    if (action === 'reset') setPaletteColorWeight(hex, 1);
+  });
+  return button;
+}
+
+function setPaletteColorWeight(hex, weight) {
+  const key = normalizeHexColor(hex);
+  if (!key) return;
+  const next = Math.round(clamp(Number(weight) || 1, 0.5, 2) * 10) / 10;
+  if (next === 1) delete state.paletteWeights[key];
+  else state.paletteWeights[key] = next;
+  renderAll();
+  els.exportStatus.textContent = key.toUpperCase() + ' 色块占比已调整为 ' + next.toFixed(1) + '。';
+}
+
+function getPaletteColorWeight(hex) {
+  const key = normalizeHexColor(hex);
+  const weight = key ? Number(state.paletteWeights[key]) : 1;
+  return Number.isFinite(weight) ? clamp(weight, 0.5, 2) : 1;
 }
 
 function renderPreview() {
@@ -640,6 +1033,7 @@ function renderPreview() {
   }
 
   els.previewCanvas.append(inner);
+  scheduleDraftSave();
 }
 
 function createPreviewSwatches() {
@@ -649,9 +1043,11 @@ function createPreviewSwatches() {
     const swatch = document.createElement('div');
     swatch.className = 'preview-swatch';
     swatch.style.background = hex;
+    swatch.style.flexGrow = String(getPaletteColorWeight(hex));
     swatches.append(swatch);
   });
   return swatches;
+
 }
 
 function createPreviewVisual(slots) {
@@ -838,6 +1234,31 @@ function getPhotoTransform(photoId) {
 
 function setPhotoTransform(photoId, transform) {
   state.photoTransforms.set(photoId, clampPhotoTransform(transform));
+  applyPhotoTransformToPreviewInstances(photoId);
+  syncPhotoCropControls(photoId);
+  scheduleDraftSave();
+}
+
+function setPhotoCropScale(photoId, scale) {
+  const transform = getPhotoTransform(photoId);
+  setPhotoTransform(photoId, {
+    scale,
+    x: transform.x,
+    y: transform.y,
+  });
+}
+
+function resetPhotoTransform(photoId) {
+  state.photoTransforms.delete(photoId);
+  applyPhotoTransformToPreviewInstances(photoId);
+  syncPhotoCropControls(photoId);
+  scheduleDraftSave();
+}
+
+function applyPhotoTransformToPreviewInstances(photoId) {
+  els.previewCanvas.querySelectorAll('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]').forEach(function (element) {
+    applyPhotoTransformToElement(element, photoId);
+  });
 }
 
 function applyPhotoTransformToElement(element, photoId) {
@@ -859,35 +1280,166 @@ function clampPhotoTransform(transform) {
   };
 }
 
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(String(value));
+  const slash = String.fromCharCode(92);
+  const quote = String.fromCharCode(34);
+  return String(value).split(slash).join(slash + slash).split(quote).join(slash + quote);
+}
+
 function applyStyleControls() {
   applyOutputRatioVars();
   setPreviewVar('--image-radius', state.style.radius + 'px');
   setPreviewVar('--image-padding', state.style.padding + 'px');
   setPreviewVar('--text-font-size', state.style.fontSize + 'px');
+
   els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
   els.previewCanvas.classList.add('font-' + state.style.font);
+  scheduleDraftSave();
+}
+
+function syncRangeValueOutputs() {
+  els.fontSizeValue.textContent = state.style.fontSize + 'px';
 }
 
 function stashDraft() {
-  const draft = {
+  saveDraft(true);
+}
+
+function clearSavedDraft() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = 0;
+  try {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    els.exportStatus.textContent = '本地草稿已清除，当前画布保留。';
+  } catch (error) {
+    els.exportStatus.textContent = '草稿清除失败，请检查浏览器存储权限。';
+  }
+}
+
+function scheduleDraftSave() {
+  if (state.restoringDraft) return;
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(function () { saveDraft(false); }, 250);
+}
+
+function saveDraft(showStatus) {
+  try {
+    localStorage.setItem(DRAFT_STORAGE_KEY, serializeDraft(getDraftSnapshot()));
+    if (showStatus) els.exportStatus.textContent = '已保存当前图片、布局、文案和样式草稿。';
+  } catch (error) {
+    if (showStatus) els.exportStatus.textContent = '草稿保存失败，可能是图片过大导致浏览器存储空间不足。';
+  }
+}
+
+function getDraftSnapshot() {
+  return {
     selectedLayout: state.selectedLayout,
     activePanel: state.activePanel,
     coverText: els.coverTextInput.value,
-    style: state.style,
     customColor: state.customColor,
-    colors: getPaletteColors(),
+    paletteOrder: state.paletteOrder,
+    paletteWeights: state.paletteWeights,
+    visionInsight: state.visionInsight,
+    fields: {
+      coverText: els.coverTextInput.value,
+    },
+    style: state.style,
+    photos: state.photos.map(function (photo) {
+      return {
+        id: photo.id,
+        fileName: photo.fileName,
+        dataUrl: photo.dataUrl || photo.src,
+        dominantColor: photo.dominantColor,
+        textColor: photo.textColor,
+        metadata: photo.metadata,
+        naturalWidth: photo.naturalWidth,
+        naturalHeight: photo.naturalHeight,
+        ratio: photo.ratio,
+        transform: getPhotoTransform(photo.id),
+      };
+    }),
   };
-  localStorage.setItem('color-walk-draft', JSON.stringify(draft));
-  els.exportStatus.textContent = '已暂存当前布局、封面文字和样式。';
+}
+
+async function restoreDraft() {
+  const draft = parseDraft(localStorage.getItem(DRAFT_STORAGE_KEY));
+  if (!draft) return false;
+  state.restoringDraft = true;
+  try {
+    state.selectedLayout = draft.selectedLayout;
+    state.activePanel = draft.activePanel;
+    state.customColor = draft.customColor;
+    state.paletteOrder = draft.paletteOrder;
+    state.paletteWeights = draft.paletteWeights;
+    state.visionInsight = draft.visionInsight;
+    state.style = { ...state.style, ...draft.style };
+    els.coverTextInput.value = draft.coverText || draft.fields.coverText;
+    state.photos = [];
+    state.photoTransforms.clear();
+    for (const photo of draft.photos) {
+      const image = await loadImage(photo.dataUrl);
+      state.photos.push({ ...photo, src: photo.dataUrl, image });
+      state.photoTransforms.set(photo.id, photo.transform);
+    }
+    renderPanelTabs();
+    renderLayoutControls();
+    renderRatioPresets();
+    syncStyleInputs();
+    applyCanvasViewport();
+    return true;
+  } catch (error) {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    return false;
+  } finally {
+    state.restoringDraft = false;
+  }
+}
+
+function syncStyleInputs() {
+  els.radiusInput.value = String(state.style.radius);
+  els.paddingInput.value = String(state.style.padding);
+  els.fontSizeInput.value = String(state.style.fontSize);
+  els.fontSelect.value = state.style.font;
+  applyStyleControls();
 }
 
 async function copyCurrentText() {
-  const text = getCurrentCoverText();
+  const copied = await copyTextToClipboard(getCurrentCoverText());
+  els.exportStatus.textContent = copied ? '文案已复制。' : '复制失败，请手动选择文本复制。';
+}
+
+async function copyTextToClipboard(text) {
   try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable');
     await navigator.clipboard.writeText(text);
-    els.exportStatus.textContent = '封面文字已复制。';
+    return true;
   } catch (error) {
-    els.exportStatus.textContent = '复制失败，请手动选择文本复制。';
+    return copyTextWithSelectionFallback(text);
+  }
+}
+
+function copyTextWithSelectionFallback(text) {
+  if (typeof document.execCommand !== 'function') return false;
+
+  const activeElement = document.activeElement;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.inset = '0 auto auto -9999px';
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  try {
+    return document.execCommand('copy');
+  } catch (error) {
+    return false;
+  } finally {
+    textarea.remove();
+    if (activeElement && typeof activeElement.focus === 'function') activeElement.focus();
   }
 }
 
@@ -900,9 +1452,17 @@ async function exportPng() {
   els.exportStatus.textContent = '正在生成 PNG...';
   const canvas = els.exportCanvas;
   canvas.width = 1080;
-  canvas.height = getOutputExportHeight(1080);
+  canvas.height = getDomExportHeight(canvas.width);
+
   const ctx = canvas.getContext('2d');
-  drawExport(ctx, canvas.width, canvas.height);
+  try {
+    await drawPreviewDomToCanvas(ctx, canvas.width, canvas.height);
+    if (isCanvasSnapshotSuspicious(ctx, canvas.width, canvas.height)) {
+      drawExport(ctx, canvas.width, canvas.height);
+    }
+  } catch (error) {
+    drawExport(ctx, canvas.width, canvas.height);
+  }
 
   canvas.toBlob(function (blob) {
     if (!blob) {
@@ -918,6 +1478,58 @@ async function exportPng() {
     els.exportStatus.textContent = '已导出 PNG。';
   }, 'image/png', 0.95);
 }
+
+function getDomExportHeight(width) {
+  const rect = els.previewCanvas.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) return Math.round(width * (rect.height / rect.width));
+  return getOutputExportHeight(width);
+}
+
+function isCanvasSnapshotSuspicious(ctx, width, height) {
+  const points = [
+    [0.12, 0.12], [0.5, 0.12], [0.88, 0.12],
+    [0.12, 0.5], [0.5, 0.5], [0.88, 0.5],
+    [0.12, 0.88], [0.5, 0.88], [0.88, 0.88],
+  ];
+  return points.every(function (point) {
+    const x = Math.min(width - 1, Math.max(0, Math.round(point[0] * width)));
+    const y = Math.min(height - 1, Math.max(0, Math.round(point[1] * height)));
+    const pixel = ctx.getImageData(x, y, 1, 1).data;
+    return pixel[3] === 0 || (pixel[0] < 3 && pixel[1] < 3 && pixel[2] < 3);
+  });
+}
+
+async function drawPreviewDomToCanvas(ctx, width, height) {
+  const clone = clonePreviewForExport(width, height);
+  const cssText = collectExportCssText();
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml"><style>' + cssText + '</style>' + serialized + '</div></foreignObject></svg>';
+  const image = await loadImage('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+}
+
+function clonePreviewForExport(width, height) {
+  const clone = els.previewCanvas.cloneNode(true);
+  clone.style.width = width + 'px';
+  clone.style.height = height + 'px';
+  clone.style.maxWidth = 'none';
+  clone.style.maxHeight = 'none';
+  clone.style.boxShadow = 'none';
+  clone.style.transform = 'none';
+  return clone;
+}
+
+function collectExportCssText() {
+  return Array.from(document.styleSheets).map(function (sheet) {
+    try {
+      return Array.from(sheet.cssRules).map(function (rule) { return rule.cssText; }).join('\n');
+    } catch {
+      return '';
+    }
+  }).join('\n');
+}
+
 
 function getOutputExportHeight(width) {
   const preset = getSelectedRatioPreset();
@@ -1026,11 +1638,22 @@ function drawImageGrid(ctx, x, y, w, h, columns, gap) {
 
 function drawPalette(ctx, x, y, w, h, vertical) {
   const colors = getPaletteColors();
-  const size = vertical ? h / colors.length : w / colors.length;
-  colors.forEach(function (hex, index) {
-    ctx.fillStyle = hex;
-    if (vertical) ctx.fillRect(x, y + index * size, w, size + 1);
-    else ctx.fillRect(x + index * size, y, size + 1, h);
+  getPaletteSizeSegments(colors, vertical ? h : w).forEach(function (segment) {
+    ctx.fillStyle = segment.hex;
+    if (vertical) ctx.fillRect(x, y + segment.offset, w, segment.size + 1);
+    else ctx.fillRect(x + segment.offset, y, segment.size + 1, h);
+  });
+}
+
+function getPaletteSizeSegments(colors, totalSize) {
+  const weights = colors.map(getPaletteColorWeight);
+  const totalWeight = weights.reduce(function (sum, weight) { return sum + weight; }, 0) || colors.length || 1;
+  let offset = 0;
+  return colors.map(function (hex, index) {
+    const size = index === colors.length - 1 ? totalSize - offset : totalSize * (weights[index] / totalWeight);
+    const segment = { hex, offset, size };
+    offset += size;
+    return segment;
   });
 }
 
@@ -1119,13 +1742,45 @@ function getSelectedLayout() {
 }
 
 function getPaletteColors() {
-  return state.photos.length ? state.photos.map(function (photo) { return photo.dominantColor.hex; }) : ['#3498db', '#e67e22', '#2ecc71', '#e74c3c'];
+  const colors = state.photos.length
+    ? state.photos.map(function (photo) { return photo.dominantColor.hex; })
+    : ['#f05f87', '#6aa9ff', '#82c784', '#f1c84b'];
+  return applyPaletteOrder(colors.map(normalizeHexColor).filter(Boolean));
+}
+
+function applyPaletteOrder(colors) {
+  if (!state.paletteOrder.length) return colors;
+  const remaining = colors.slice();
+  const ordered = [];
+  state.paletteOrder.forEach(function (savedHex) {
+    const hex = normalizeHexColor(savedHex);
+    if (!hex) return;
+    const index = remaining.findIndex(function (item) { return item.toLowerCase() === hex.toLowerCase(); });
+    if (index !== -1) ordered.push(remaining.splice(index, 1)[0]);
+  });
+  return ordered.concat(remaining);
+}
+
+function normalizeHexColor(value) {
+  const hex = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(hex) ? hex.toLowerCase() : '';
+
 }
 
 function getMainColorHex() {
   if (!state.photos.length) return '';
   return buildPaletteSummary(state.photos.map(function (photo) { return photo.dominantColor.hex; })).average.hex;
 }
+
+function fileToDataUrl(file) {
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function () { resolve(String(reader.result || '')); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 
 function loadImage(src) {
   return new Promise(function (resolve, reject) {
@@ -1144,14 +1799,18 @@ function handleResetUpload() {
 }
 
 function resetApp() {
-  state.photos.forEach(function (photo) { URL.revokeObjectURL(photo.src); });
+  state.photos.forEach(revokePhotoUrl);
+  localStorage.removeItem(DRAFT_STORAGE_KEY);
   state.photos = [];
   state.photoTransforms.clear();
+  state.paletteOrder = [];
+  state.paletteWeights = {};
   state.imageGesture.activePhotoId = null;
   state.imageGesture.pointerId = null;
   state.imageGesture.pointers.clear();
   state.imageGesture.pinchStartDistance = 0;
   state.copyDirty = false;
+  state.visionInsight = null;
   state.customColor = '#2a4252';
   state.style.outputRatio = '3:4';
   state.viewport.zoom = 1;
@@ -1169,6 +1828,10 @@ function resetApp() {
   seedCoverText(true);
   renderAll();
   els.exportStatus.textContent = '';
+}
+
+function revokePhotoUrl(photo) {
+  if (photo?.src && photo.src.startsWith('blob:')) URL.revokeObjectURL(photo.src);
 }
 
 function escapeHtml(value) {

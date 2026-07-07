@@ -1,10 +1,13 @@
 FROM node:22-alpine
 
 WORKDIR /app
+ENV NODE_ENV=production
+
 COPY package.json package-lock.json ./
-COPY server.js ./server.js
 COPY index.html ./index.html
 COPY src/ ./src/
+COPY server/ ./server/
+COPY server.js ./server.js
 
-EXPOSE 8080
-CMD ["npm", "start"]
+EXPOSE 3000
+CMD ["node", "server.js"]

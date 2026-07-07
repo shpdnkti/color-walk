@@ -8,6 +8,7 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(testDir, '../index.html'), 'utf8');
 const css = readFileSync(resolve(testDir, '../src/styles.css'), 'utf8');
 const appJs = readFileSync(resolve(testDir, '../src/app.js'), 'utf8');
+const draftJs = readFileSync(resolve(testDir, '../src/draft.js'), 'utf8');
 
 test('renders the fixed mobile editor shell from design.md', () => {
   assert.match(html, /class="app-shell editor-shell"/);
@@ -175,6 +176,50 @@ test('binds non-destructive image transform controls inside preview masks', () =
   assert.match(css, /\.preview-image\.is-transforming/);
 });
 
+test('exposes discoverable per-photo crop controls from the palette photo cards', () => {
+  assert.match(appJs, /function createPhotoCropControls/);
+  assert.match(appJs, /className = 'photo-crop-controls'/);
+  assert.match(appJs, /className = 'photo-crop-button'/);
+  assert.match(appJs, /className = 'photo-crop-slider'/);
+  assert.match(appJs, /data-crop-action/);
+  assert.match(appJs, /aria-label', '调整 .* 裁切缩放/);
+  assert.match(appJs, /createPhotoCropButton\(photo, 'reset'[\s\S]*?'重置 ' \+ photo\.fileName \+ ' 裁切'/);
+});
+
+test('wires per-photo crop controls to transform state and preview refresh', () => {
+  assert.match(appJs, /function setPhotoCropScale\(photoId, scale\)/);
+  assert.match(appJs, /function resetPhotoTransform\(photoId\)/);
+  assert.match(appJs, /function applyPhotoTransformToPreviewInstances\(photoId\)/);
+  assert.match(appJs, /setPhotoTransform\(photoId, \{\s*scale,\s*x: transform\.x,\s*y: transform\.y,\s*\}\)/);
+  assert.match(appJs, /state\.photoTransforms\.delete\(photoId\)/);
+  assert.match(appJs, /querySelectorAll\('\.preview-image\[data-photo-id="' \+ cssEscape\(photoId\) \+ '"\]'\)/);
+});
+
+test('styles photo crop controls as compact card-level editing controls', () => {
+  assert.match(css, /\.photo-thumb\s*\{/);
+  assert.match(css, /\.photo-crop-controls\s*\{/);
+  assert.match(css, /\.photo-crop-button\s*\{/);
+  assert.match(css, /\.photo-crop-slider\s*\{/);
+  assert.match(css, /\.photo-crop-value\s*\{/);
+  assert.match(css, /\.photo-crop-button:focus-visible/);
+});
+
+test('shows live numeric values for the font size slider', () => {
+  assert.match(html, /id="fontSizeValue"/);
+  assert.match(html, /src="src\/app\.js\?v=[^"]+"/);
+  assert.match(html, /id="fontSizeInput"[^>]+data-range-output="#fontSizeValue"[^>]+data-range-unit="px"/);
+  assert.match(html, /function bindRangeValueOutputs\(\)/);
+  assert.match(html, /addEventListener\('input', sync\)/);
+  assert.match(html, /addEventListener\('change', sync\)/);
+  assert.match(appJs, /fontSizeValue: document\.querySelector\('#fontSizeValue'\)/);
+  assert.match(appJs, /function syncRangeValueOutputs\(\)/);
+  assert.match(appJs, /function handleStyleRangeInput/);
+  assert.match(appJs, /addEventListener\('change', handleStyleRangeInput\)/);
+  assert.match(appJs, /els\.fontSizeValue\.textContent = state\.style\.fontSize \+ 'px'/);
+  assert.match(css, /\.range-value/);
+});
+
+
 test('keeps the canvas zoom toolbar in the lower-right corner by default', () => {
   assert.match(css, /\.canvas-zoom-toolbar\s*\{[\s\S]*?right:\s*16px;[\s\S]*?bottom:\s*12px;[\s\S]*?transform:\s*none;/);
 });
@@ -235,3 +280,79 @@ test('does not ship hidden movie poster layout code', () => {
   assert.doesNotMatch(css, /movie-/);
 });
 
+
+
+test('wires draggable photo sorting controls in the palette panel', () => {
+  assert.match(appJs, /function movePhoto/);
+  assert.match(appJs, /card.draggable = true/);
+  assert.match(appJs, /dragstart/);
+  assert.match(appJs, /drop/);
+  assert.match(css, /.photo-card.is-dragging/);
+});
+
+test('restores and auto-saves local drafts with image data', () => {
+  assert.match(appJs, /restoreDraft/);
+  assert.match(appJs, /scheduleDraftSave/);
+  assert.match(appJs, /serializeDraft/);
+  assert.match(appJs, /parseDraft/);
+  assert.match(appJs, /dataUrl/);
+});
+
+test('wires a manual local draft clear action that preserves the current editor', () => {
+  assert.match(html, /id="clearDraftButton"/);
+  assert.match(html, />清除草稿</);
+  assert.match(appJs, /clearDraftButton/);
+  assert.match(appJs, /addEventListener\('click', clearSavedDraft\)/);
+  assert.match(appJs, /function clearSavedDraft/);
+  assert.match(appJs, /clearTimeout\(draftSaveTimer\)/);
+  assert.match(appJs, /localStorage\.removeItem\(DRAFT_STORAGE_KEY\)/);
+  assert.match(appJs, /当前画布保留/);
+  assert.match(css, /\.clear-draft-action/);
+});
+
+test('uses a DOM snapshot export path before the canvas fallback', () => {
+  assert.match(appJs, /drawPreviewDomToCanvas/);
+  assert.match(appJs, /foreignObject/);
+  assert.match(appJs, /clonePreviewForExport/);
+  assert.ok(appJs.includes('drawExport(ctx, canvas.width, canvas.height)'));
+});
+
+test('requests readable place names for GPS metadata', () => {
+  assert.match(appJs, /reverseGeocodePhoto/);
+  assert.ok(appJs.includes('/api/reverse-geocode'));
+  assert.match(appJs, /formatReverseGeocodeLabel/);
+});
+
+
+test('wires real AI image recognition controls into the copy workflow', () => {
+  assert.match(html, /id="aiAnalyzeButton"/);
+  assert.match(html, />AI识图</);
+  assert.match(appJs, /aiAnalyzeButton/);
+  assert.match(appJs, /function analyzePhotosWithAI/);
+  assert.ok(appJs.includes('/api/analyze-image'));
+  assert.match(appJs, /visionInsight/);
+});
+
+
+test('wires draggable palette swatch ordering into preview and drafts', () => {
+  assert.match(appJs, /paletteOrder/);
+  assert.match(appJs, /draggedColorIndex/);
+  assert.match(appJs, /function movePaletteColor/);
+  assert.match(appJs, /swatch.draggable = true/);
+  assert.match(css, /palette-swatch.is-dragging/);
+  assert.ok(appJs.includes('paletteOrder: state.paletteOrder'));
+  assert.ok(appJs.includes('state.paletteOrder = draft.paletteOrder'));
+});
+
+test('wires per-swatch size controls into preview, export, and drafts', () => {
+  assert.match(appJs, /paletteWeights/);
+  assert.match(appJs, /function setPaletteColorWeight/);
+  assert.match(appJs, /data-palette-size-action/);
+  assert.match(appJs, /swatch\.style\.flexGrow = String\(getPaletteColorWeight\(hex\)\)/);
+  assert.match(appJs, /drawPalette\(ctx, x, y, w, h, vertical\)/);
+  assert.match(appJs, /getPaletteSizeSegments\(colors, vertical \? h : w\)/);
+  assert.ok(appJs.includes('paletteWeights: state.paletteWeights'));
+  assert.ok(appJs.includes('state.paletteWeights = draft.paletteWeights'));
+  assert.ok(draftJs.includes('paletteWeights: normalizePaletteWeights(input.paletteWeights)'));
+  assert.match(css, /\.palette-size-controls/);
+});

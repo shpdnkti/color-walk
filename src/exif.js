@@ -1,15 +1,9 @@
-const TAG_MAKE = 0x010f;
-const TAG_MODEL = 0x0110;
 const TAG_DATE_TIME = 0x0132;
+const TAG_MODEL = 0x0110;
 const TAG_EXIF_IFD = 0x8769;
 const TAG_GPS_IFD = 0x8825;
-const TAG_EXPOSURE_TIME = 0x829a;
-const TAG_F_NUMBER = 0x829d;
-const TAG_ISO_SPEED = 0x8827;
-const TAG_PHOTOGRAPHIC_SENSITIVITY = 0x8833;
 const TAG_DATE_ORIGINAL = 0x9003;
 const TAG_DATE_DIGITIZED = 0x9004;
-const TAG_FOCAL_LENGTH = 0x920a;
 
 export function formatExifDate(value) {
   const match = String(value || '').match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
@@ -20,14 +14,42 @@ export function formatExifDate(value) {
   const year = match[1];
   const month = match[2];
   const day = match[3];
-  const hour = match[4];
-  const minute = match[5];
   return {
     raw: value,
     date: year + '-' + month + '-' + day,
     display: year + '.' + month + '.' + day,
-    time: hour + ':' + minute,
+    time: match[4] + ':' + match[5],
   };
+}
+
+export function formatAperture(value) {
+  const number = rationalToNumber(value);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  return 'f/' + trimNumber(number);
+}
+
+export function formatShutterSpeed(value) {
+  const seconds = rationalToNumber(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  if (seconds < 1) return '1/' + Math.round(1 / seconds) + 's';
+  return trimNumber(seconds) + 's';
+}
+
+export function formatIso(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const iso = Number(raw);
+  if (!Number.isFinite(iso) || iso <= 0) return '';
+  return 'ISO ' + Math.round(iso);
+}
+
+export function formatFocalLength(value) {
+  const number = rationalToNumber(value);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  return trimNumber(number) + 'mm';
+}
+
+function trimNumber(value) {
+  return Number(value.toFixed(1)).toString();
 }
 
 export function gpsToDecimal(values, ref = '') {
@@ -42,86 +64,136 @@ export function gpsToDecimal(values, ref = '') {
   return Number((decimal * sign).toFixed(6));
 }
 
-export function formatAperture(value) {
-  const number = rationalToNumber(Array.isArray(value) ? value[0] : value);
-  if (!Number.isFinite(number) || number <= 0) return '';
-  return 'f/' + trimNumber(number, 1);
-}
-
-export function formatShutterSpeed(value) {
-  const number = rationalToNumber(Array.isArray(value) ? value[0] : value);
-  if (!Number.isFinite(number) || number <= 0) return '';
-  if (number >= 1) return trimNumber(number, 1) + 's';
-
-  const denominator = Math.round(1 / number);
-  if (!Number.isFinite(denominator) || denominator <= 0) return '';
-  return '1/' + denominator + 's';
-}
-
-export function formatIso(value) {
-  const number = Array.isArray(value) ? value[0] : value;
-  if (!Number.isFinite(number) || number <= 0) return '';
-  return 'ISO ' + Math.round(number);
-}
-
-export function formatFocalLength(value) {
-  const number = rationalToNumber(Array.isArray(value) ? value[0] : value);
-  if (!Number.isFinite(number) || number <= 0) return '';
-  return trimNumber(number, 1) + 'mm';
-}
-
 export async function extractPhotoMetadata(file) {
-  const empty = createEmptyMetadata();
-
-  if (!file || typeof file.arrayBuffer !== 'function') return empty;
+  if (!file || typeof file.arrayBuffer !== 'function') return emptyMetadata();
 
   try {
     const buffer = await file.arrayBuffer();
-    const parsed = parseExif(buffer);
-    if (!parsed) return empty;
-
-    const dateInfo = formatExifDate(parsed.dateTimeOriginal || parsed.dateTime || '');
-    const latitude = gpsToDecimal(parsed.gpsLatitude, parsed.gpsLatitudeRef);
-    const longitude = gpsToDecimal(parsed.gpsLongitude, parsed.gpsLongitudeRef);
-
-    return {
-      rawDate: dateInfo.raw,
-      date: dateInfo.date,
-      displayDate: dateInfo.display,
-      time: dateInfo.time,
-      latitude,
-      longitude,
-      gpsLabel: latitude !== null && longitude !== null ? latitude.toFixed(4) + ', ' + longitude.toFixed(4) : '',
-      camera: formatCamera(parsed.make, parsed.model),
-      aperture: formatAperture(parsed.aperture),
-      shutter: formatShutterSpeed(parsed.shutter),
-      iso: formatIso(parsed.iso),
-      focalLength: formatFocalLength(parsed.focalLength),
-    };
+    return extractMetadataFromBuffer(buffer, file);
   } catch {
-    return empty;
+    return emptyMetadata();
   }
 }
 
-function createEmptyMetadata() {
+export async function extractMetadataFromBuffer(buffer, fileInfo = {}) {
+  if (!buffer) return metadataWithFallback(null, fileInfo);
+  const parsed = await parseMetadata(buffer, fileInfo);
+  return metadataWithFallback(parsed, fileInfo);
+}
+
+function emptyMetadata() {
   return {
     rawDate: '',
     date: '',
     displayDate: '',
-    time: '',
     latitude: null,
     longitude: null,
     gpsLabel: '',
     camera: '',
-    aperture: '',
-    shutter: '',
-    iso: '',
-    focalLength: '',
   };
 }
 
-function parseExif(buffer) {
-  const view = new DataView(buffer);
+function metadataWithFallback(parsed, fileInfo) {
+  const metadata = parsed ? metadataFromParsed(parsed) : emptyMetadata();
+
+  if (!metadata.date && Number.isFinite(fileInfo.lastModified) && fileInfo.lastModified > 0) {
+    const date = new Date(fileInfo.lastModified);
+    if (!Number.isNaN(date.getTime())) {
+      const isoDate = date.toISOString().slice(0, 10);
+      return {
+        ...metadata,
+        rawDate: 'file:lastModified',
+        date: isoDate,
+        displayDate: isoDate.replace(/-/g, '.'),
+      };
+    }
+  }
+
+  return metadata;
+}
+
+function metadataFromParsed(parsed) {
+  const dateInfo = formatExifDate(parsed.dateTimeOriginal || parsed.dateTime || '');
+  const latitude = readLatitude(parsed);
+  const longitude = readLongitude(parsed);
+
+  return {
+    rawDate: dateInfo.raw,
+    date: dateInfo.date,
+    displayDate: dateInfo.display,
+    time: dateInfo.time,
+    latitude,
+    longitude,
+    gpsLabel: latitude !== null && longitude !== null ? latitude.toFixed(4) + ', ' + longitude.toFixed(4) : '',
+    camera: parsed.camera || '',
+  };
+}
+
+function readLatitude(parsed) {
+  if (parsed.gpsLatitudeDecimal !== undefined) return normalizeDecimalCoordinate(parsed.gpsLatitudeDecimal, 90);
+  return gpsToDecimal(parsed.gpsLatitude, parsed.gpsLatitudeRef);
+}
+
+function readLongitude(parsed) {
+  if (parsed.gpsLongitudeDecimal !== undefined) return normalizeDecimalCoordinate(parsed.gpsLongitudeDecimal, 180);
+  return gpsToDecimal(parsed.gpsLongitude, parsed.gpsLongitudeRef);
+}
+
+function normalizeDecimalCoordinate(value, limit) {
+  const number = Number(value);
+  const coordinate = Number.isFinite(number) ? number : parseCoordinateText(value);
+  if (!Number.isFinite(coordinate) || coordinate < -limit || coordinate > limit) return null;
+  return Number(coordinate.toFixed(6));
+}
+
+function parseCoordinateText(value) {
+  const text = String(value || '').trim();
+  if (!text) return Number.NaN;
+
+  const rational = parseRationalCoordinateText(text);
+  if (Number.isFinite(rational)) return rational;
+
+  const refMatch = text.match(/[NSEW]$/i);
+  const ref = refMatch ? refMatch[0].toUpperCase() : '';
+  const cleaned = text.replace(/[NSEW]$/i, '').trim();
+  const parts = cleaned
+    .replace(/[^0-9.+-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(Number);
+
+  if (!parts.length || parts.some(function (part) { return !Number.isFinite(part); })) return Number.NaN;
+  const sign = cleaned.startsWith('-') || ref === 'S' || ref === 'W' ? -1 : 1;
+  const degrees = Math.abs(parts[0]);
+  const minutes = parts[1] || 0;
+  const seconds = parts[2] || 0;
+  return sign * (degrees + minutes / 60 + seconds / 3600);
+}
+
+function parseRationalCoordinateText(text) {
+  const matches = Array.from(String(text || '').matchAll(/([+-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g));
+  if (matches.length < 3) return Number.NaN;
+
+  const values = matches.slice(0, 3).map(function (match) {
+    const numerator = Number(match[1]);
+    const denominator = Number(match[2]);
+    return denominator ? numerator / denominator : Number.NaN;
+  });
+  if (values.some(function (part) { return !Number.isFinite(part); })) return Number.NaN;
+
+  const refMatch = String(text).trim().match(/[NSEW]$/i);
+  const ref = refMatch ? refMatch[0].toUpperCase() : '';
+  const sign = String(text).trim().startsWith('-') || ref === 'S' || ref === 'W' ? -1 : 1;
+  return sign * (Math.abs(values[0]) + values[1] / 60 + values[2] / 3600);
+}
+
+async function parseMetadata(buffer, fileInfo = {}) {
+  const view = buffer instanceof DataView ? buffer : new DataView(buffer);
+  return parseJpegExif(view) || await parsePngMetadata(view) || parseHeicMetadata(view, fileInfo) || null;
+}
+
+function parseJpegExif(view) {
   if (view.byteLength < 4 || view.getUint16(0) !== 0xffd8) return null;
 
   let offset = 2;
@@ -141,6 +213,260 @@ function parseExif(buffer) {
   return null;
 }
 
+async function parsePngMetadata(view) {
+  if (!hasPngSignature(view)) return null;
+
+  let offset = 8;
+  const textEntries = {};
+  let exif = null;
+
+  while (offset + 12 <= view.byteLength) {
+    const length = view.getUint32(offset, false);
+    const type = readAscii(view, offset + 4, 4);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd + 4 > view.byteLength) break;
+
+    if (type === 'eXIf') {
+      exif = readTiff(view, dataStart);
+    } else if (type === 'tEXt') {
+      Object.assign(textEntries, readPngTextChunk(view, dataStart, length));
+    } else if (type === 'zTXt') {
+      Object.assign(textEntries, await readPngCompressedTextChunk(view, dataStart, length));
+    } else if (type === 'iTXt') {
+      Object.assign(textEntries, await readPngInternationalTextChunk(view, dataStart, length));
+    }
+
+    offset = dataEnd + 4;
+  }
+
+  return mergeParsedMetadata(exif, pngTextToParsed(textEntries));
+}
+
+function parseHeicMetadata(view, fileInfo) {
+  if (!looksLikeHeic(view, fileInfo)) return null;
+
+  const referencedExif = parseHeicReferencedExif(view);
+  if (referencedExif) return referencedExif;
+
+  const tiffStart = findTiffHeader(view);
+  if (tiffStart !== -1) return readTiff(view, tiffStart);
+
+  const xmpPacket = findEmbeddedXmpPacket(view);
+  if (!xmpPacket) return null;
+  const parsed = xmpTextToParsed({ xmp: xmpPacket });
+  return hasParsedMetadata(parsed) ? parsed : null;
+}
+
+function parseHeicReferencedExif(view) {
+  const metaBox = findHeicMetaBox(view);
+  if (!metaBox || metaBox.dataStart + 4 > metaBox.dataEnd) return null;
+
+  const itemTypes = readHeicItemTypes(view, metaBox.dataStart + 4, metaBox.dataEnd);
+  const exifIds = Array.from(itemTypes.entries())
+    .filter(function (entry) { return entry[1].type === 'Exif' || entry[1].name.toLowerCase() === 'exif'; })
+    .map(function (entry) { return entry[0]; });
+  if (!exifIds.length) return null;
+
+  const locations = readHeicItemLocations(view, metaBox.dataStart + 4, metaBox.dataEnd);
+  for (const itemId of exifIds) {
+    const location = locations.get(itemId);
+    const parsed = location ? readHeicExifPayload(view, location.offset, location.length) : null;
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function findHeicMetaBox(view) {
+  return readHeicBoxes(view, 0, view.byteLength).find(function (box) { return box.type === 'meta'; }) || null;
+}
+
+function readHeicItemTypes(view, start, end) {
+  const itemTypes = new Map();
+  const info = readHeicBoxes(view, start, end).find(function (box) { return box.type === 'iinf'; });
+  if (!info || info.dataStart + 6 > info.dataEnd) return itemTypes;
+
+  const version = view.getUint8(info.dataStart);
+  let offset = info.dataStart + 4;
+  const entryCount = version === 0 ? view.getUint16(offset, false) : view.getUint32(offset, false);
+  offset += version === 0 ? 2 : 4;
+
+  for (const entry of readHeicBoxes(view, offset, info.dataEnd).slice(0, entryCount)) {
+    if (entry.type !== 'infe') continue;
+    const parsed = readHeicItemInfoEntry(view, entry);
+    if (parsed) itemTypes.set(parsed.id, parsed);
+  }
+  return itemTypes;
+}
+
+function readHeicItemInfoEntry(view, box) {
+  if (box.dataStart + 8 > box.dataEnd) return null;
+  const version = view.getUint8(box.dataStart);
+  let offset = box.dataStart + 4;
+  let id;
+  let type = '';
+
+  if (version >= 2) {
+    if (version === 2) {
+      if (offset + 8 > box.dataEnd) return null;
+      id = view.getUint16(offset, false);
+      offset += 2;
+    } else {
+      if (offset + 10 > box.dataEnd) return null;
+      id = view.getUint32(offset, false);
+      offset += 4;
+    }
+    offset += 2;
+    type = readAscii(view, offset, 4);
+    offset += 4;
+  } else {
+    id = view.getUint16(offset, false);
+    offset += 4;
+  }
+
+  return {
+    id,
+    type,
+    name: readNullTerminatedAscii(view, offset, box.dataEnd),
+  };
+}
+
+function readHeicItemLocations(view, start, end) {
+  const locations = new Map();
+  const locationBox = readHeicBoxes(view, start, end).find(function (box) { return box.type === 'iloc'; });
+  if (!locationBox || locationBox.dataStart + 8 > locationBox.dataEnd) return locations;
+
+  const version = view.getUint8(locationBox.dataStart);
+  let offset = locationBox.dataStart + 4;
+  const sizes = view.getUint8(offset);
+  const offsetSize = sizes >> 4;
+  const lengthSize = sizes & 0x0f;
+  const baseAndIndexSizes = view.getUint8(offset + 1);
+  const baseOffsetSize = baseAndIndexSizes >> 4;
+  const indexSize = version === 1 || version === 2 ? baseAndIndexSizes & 0x0f : 0;
+  offset += 2;
+
+  if (offset + (version < 2 ? 2 : 4) > locationBox.dataEnd) return locations;
+  const itemCount = version < 2 ? view.getUint16(offset, false) : view.getUint32(offset, false);
+  offset += version < 2 ? 2 : 4;
+
+  for (let index = 0; index < itemCount && offset < locationBox.dataEnd; index += 1) {
+    if (offset + (version < 2 ? 2 : 4) > locationBox.dataEnd) break;
+    const itemId = version < 2 ? view.getUint16(offset, false) : view.getUint32(offset, false);
+    offset += version < 2 ? 2 : 4;
+
+    let constructionMethod = 0;
+    if (version === 1 || version === 2) {
+      if (offset + 2 > locationBox.dataEnd) break;
+      constructionMethod = view.getUint16(offset, false) & 0x000f;
+      offset += 2;
+    }
+
+    if (offset + 2 + baseOffsetSize + 2 > locationBox.dataEnd) break;
+    offset += 2;
+    const baseOffset = readVariableUint(view, offset, baseOffsetSize);
+    offset += baseOffsetSize;
+    const extentCount = view.getUint16(offset, false);
+    offset += 2;
+
+    for (let extentIndex = 0; extentIndex < extentCount && offset < locationBox.dataEnd; extentIndex += 1) {
+      const required = indexSize + offsetSize + lengthSize;
+      if (offset + required > locationBox.dataEnd) break;
+      offset += indexSize;
+      const extentOffset = readVariableUint(view, offset, offsetSize);
+      offset += offsetSize;
+      const extentLength = readVariableUint(view, offset, lengthSize);
+      offset += lengthSize;
+
+      if (extentIndex === 0 && constructionMethod === 0 && Number.isFinite(baseOffset) && Number.isFinite(extentOffset) && Number.isFinite(extentLength)) {
+        locations.set(itemId, {
+          offset: baseOffset + extentOffset,
+          length: extentLength,
+        });
+      }
+    }
+  }
+
+  return locations;
+}
+
+function readHeicExifPayload(view, offset, length) {
+  const end = offset + length;
+  if (offset < 0 || length <= 0 || end > view.byteLength) return null;
+
+  if (length >= 4) {
+    const tiffOffset = view.getUint32(offset, false);
+    if (tiffOffset >= 4 && tiffOffset + 8 <= length) {
+      const parsed = readTiff(view, offset + tiffOffset);
+      if (parsed) return parsed;
+    }
+  }
+
+  if (hasExifHeader(view, offset) && offset + 14 <= end) {
+    const parsed = readTiff(view, offset + 6);
+    if (parsed) return parsed;
+  }
+
+  const tiffStart = findTiffHeaderInRange(view, offset, end);
+  return tiffStart === -1 ? null : readTiff(view, tiffStart);
+}
+
+function readHeicBoxes(view, start, end) {
+  const boxes = [];
+  let offset = start;
+
+  while (offset + 8 <= end) {
+    const size = view.getUint32(offset, false);
+    const type = readAscii(view, offset + 4, 4);
+    const boxEnd = size === 0 ? end : offset + size;
+    if (size < 8 || boxEnd > end) break;
+
+    boxes.push({
+      type,
+      start: offset,
+      end: boxEnd,
+      dataStart: offset + 8,
+      dataEnd: boxEnd,
+    });
+
+    if (size === 0) break;
+    offset = boxEnd;
+  }
+
+  return boxes;
+}
+
+function readVariableUint(view, offset, size) {
+  let value = 0;
+  for (let index = 0; index < size; index += 1) {
+    value = value * 256 + view.getUint8(offset + index);
+    if (value > Number.MAX_SAFE_INTEGER) return Number.NaN;
+  }
+  return value;
+}
+
+function readNullTerminatedAscii(view, offset, end) {
+  let result = '';
+  for (let index = offset; index < end; index += 1) {
+    const byte = view.getUint8(index);
+    if (byte === 0) break;
+    result += String.fromCharCode(byte);
+  }
+  return result.trim();
+}
+
+function findEmbeddedXmpPacket(view) {
+  const text = decodeUtf8(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+  const start = text.indexOf('<x:xmpmeta') !== -1 ? text.indexOf('<x:xmpmeta') : text.indexOf('<rdf:RDF');
+  if (start === -1) return '';
+
+  const xmpEnd = text.indexOf('</x:xmpmeta>', start);
+  if (xmpEnd !== -1) return text.slice(start, xmpEnd + '</x:xmpmeta>'.length);
+
+  const rdfEnd = text.indexOf('</rdf:RDF>', start);
+  return rdfEnd === -1 ? '' : text.slice(start, rdfEnd + '</rdf:RDF>'.length);
+}
+
 function hasExifHeader(view, offset) {
   return offset + 6 <= view.byteLength &&
     view.getUint8(offset) === 0x45 &&
@@ -149,6 +475,234 @@ function hasExifHeader(view, offset) {
     view.getUint8(offset + 3) === 0x66 &&
     view.getUint8(offset + 4) === 0 &&
     view.getUint8(offset + 5) === 0;
+}
+
+function hasPngSignature(view) {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  return view.byteLength >= signature.length && signature.every(function (byte, index) {
+    return view.getUint8(index) === byte;
+  });
+}
+
+function readPngTextChunk(view, offset, length) {
+  const text = readAscii(view, offset, length);
+  const separator = text.indexOf('\0');
+  if (separator === -1) return {};
+  return { [text.slice(0, separator)]: text.slice(separator + 1) };
+}
+
+async function readPngCompressedTextChunk(view, offset, length) {
+  const bytes = new Uint8Array(view.buffer, view.byteOffset + offset, length);
+  const separator = bytes.indexOf(0);
+  if (separator === -1 || separator + 2 > bytes.length) return {};
+
+  const compressionMethod = bytes[separator + 1];
+  if (compressionMethod !== 0) return {};
+
+  const inflated = await inflateBytes(bytes.slice(separator + 2));
+  if (!inflated) return {};
+
+  return {
+    [decodeUtf8(bytes.slice(0, separator))]: decodeUtf8(inflated),
+  };
+}
+
+async function inflateBytes(bytes) {
+  if (typeof DecompressionStream === 'function' && typeof Blob === 'function' && typeof Response === 'function') {
+    try {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+      // Fall through to the Node test/runtime fallback when available.
+    }
+  }
+
+  if (typeof window === 'undefined') {
+    try {
+      const zlib = await import('node:zlib');
+      return new Uint8Array(zlib.inflateSync(bytes));
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+async function readPngInternationalTextChunk(view, offset, length) {
+  const bytes = new Uint8Array(view.buffer, view.byteOffset + offset, length);
+  const firstNull = bytes.indexOf(0);
+  if (firstNull === -1 || firstNull + 3 > bytes.length) return {};
+
+  const keyword = decodeUtf8(bytes.slice(0, firstNull));
+  const compressionFlag = bytes[firstNull + 1];
+  const compressionMethod = bytes[firstNull + 2];
+  const textStart = findInternationalTextValueOffset(bytes, firstNull + 1);
+  if (textStart === -1) return {};
+
+  let textBytes = bytes.slice(textStart);
+  if (compressionFlag === 1) {
+    if (compressionMethod !== 0) return {};
+    textBytes = await inflateBytes(textBytes);
+    if (!textBytes) return {};
+  } else if (compressionFlag !== 0) {
+    return {};
+  }
+
+  return { [keyword]: decodeUtf8(textBytes) };
+}
+
+function findInternationalTextValueOffset(bytes, offset) {
+  let cursor = offset + 2;
+  for (let index = 0; index < 2; index += 1) {
+    const nextNull = bytes.indexOf(0, cursor);
+    if (nextNull === -1) return -1;
+    cursor = nextNull + 1;
+  }
+  return cursor;
+}
+
+function decodeUtf8(bytes) {
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8').decode(bytes).replace(/\0+$/, '').trim();
+  }
+  return Array.from(bytes, function (byte) { return String.fromCharCode(byte); }).join('').replace(/\0+$/, '').trim();
+}
+
+function pngTextToParsed(entries) {
+  const xmp = xmpTextToParsed(entries);
+  const dateTime = firstText(entries, ['DateTimeOriginal', 'DateTime', 'Creation Time', 'CreationTime', 'date:create', 'exif:DateTimeOriginal', 'exif:DateTimeDigitized', 'exif:DateTime', 'tiff:DateTime']) || xmp.dateTime;
+  const gpsLatitudeText = firstText(entries, ['GPSLatitude', 'Latitude', 'latitude', 'exif:GPSLatitude']);
+  const gpsLongitudeText = firstText(entries, ['GPSLongitude', 'Longitude', 'longitude', 'exif:GPSLongitude']);
+  const gpsLatitudeDecimal = withCoordinateRef(gpsLatitudeText, firstText(entries, ['GPSLatitudeRef', 'exif:GPSLatitudeRef'])) || xmp.gpsLatitudeDecimal;
+  const gpsLongitudeDecimal = withCoordinateRef(gpsLongitudeText, firstText(entries, ['GPSLongitudeRef', 'exif:GPSLongitudeRef'])) || xmp.gpsLongitudeDecimal;
+  const camera = firstText(entries, ['Model', 'Camera', 'Device', 'tiff:Model', 'exif:LensModel']) || xmp.camera;
+
+  if (!dateTime && !gpsLatitudeDecimal && !gpsLongitudeDecimal && !camera) return null;
+
+  return {
+    dateTime,
+    gpsLatitudeDecimal,
+    gpsLongitudeDecimal,
+    camera,
+  };
+}
+
+function withCoordinateRef(value, ref) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const direction = String(ref || '').trim().charAt(0).toUpperCase();
+  if (!direction || /[NSEW]$/i.test(text)) return text;
+  return text + direction;
+}
+
+function xmpTextToParsed(entries) {
+  const packet = findXmpPacket(entries);
+  if (!packet) return {};
+
+  return {
+    dateTime: normalizeXmpDate(firstXmpValue(packet, ['xmp:CreateDate', 'xmp:ModifyDate', 'photoshop:DateCreated', 'exif:DateTimeOriginal'])),
+    gpsLatitudeDecimal: firstXmpValue(packet, ['exif:GPSLatitude']),
+    gpsLongitudeDecimal: firstXmpValue(packet, ['exif:GPSLongitude']),
+    camera: firstXmpValue(packet, ['tiff:Model', 'exif:LensModel']),
+  };
+}
+
+function hasParsedMetadata(parsed) {
+  return Boolean(parsed?.dateTime || parsed?.dateTimeOriginal || parsed?.gpsLatitudeDecimal || parsed?.gpsLongitudeDecimal || parsed?.camera);
+}
+
+function findXmpPacket(entries) {
+  for (const key of Object.keys(entries)) {
+    const name = key.toLowerCase();
+    const value = String(entries[key] || '');
+    if (name.includes('xmp') || value.includes('<x:xmpmeta') || value.includes('<rdf:RDF')) return value;
+  }
+  return '';
+}
+
+function firstXmpValue(packet, names) {
+  for (const name of names) {
+    const escaped = escapeRegExp(name);
+    const doubleAttribute = new RegExp('(?:^|[\\s<])' + escaped + '\\s*=\\s*"([^"]*)"', 'i').exec(packet);
+    if (doubleAttribute) return decodeXmlEntities(doubleAttribute[1]);
+
+    const singleAttribute = new RegExp("(?:^|[\\s<])" + escaped + "\\s*=\\s*'([^']*)'", 'i').exec(packet);
+    if (singleAttribute) return decodeXmlEntities(singleAttribute[1]);
+
+    const element = new RegExp('<' + escaped + '[^>]*>([\\s\\S]*?)<\\/' + escaped + '>', 'i').exec(packet);
+    if (element) return decodeXmlEntities(element[1]);
+  }
+  return '';
+}
+
+function normalizeXmpDate(value) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return value || '';
+  return match[1] + ':' + match[2] + ':' + match[3] + ' ' + (match[4] || '00') + ':' + (match[5] || '00') + ':' + (match[6] || '00');
+}
+
+function decodeXmlEntities(value) {
+  return String(value || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim();
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+}
+
+function firstText(entries, keys) {
+  for (const key of keys) {
+    if (entries[key]) return entries[key];
+  }
+  return '';
+}
+
+function mergeParsedMetadata(primary, fallback) {
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  return {
+    ...fallback,
+    ...primary,
+    dateTime: primary.dateTime || fallback.dateTime,
+    dateTimeOriginal: primary.dateTimeOriginal || fallback.dateTimeOriginal,
+    gpsLatitudeDecimal: primary.gpsLatitudeDecimal ?? fallback.gpsLatitudeDecimal,
+    gpsLongitudeDecimal: primary.gpsLongitudeDecimal ?? fallback.gpsLongitudeDecimal,
+    camera: primary.camera || fallback.camera,
+  };
+}
+
+function looksLikeHeic(view, fileInfo = {}) {
+  const name = String(fileInfo.name || '').toLowerCase();
+  const type = String(fileInfo.type || '').toLowerCase();
+  if (name.endsWith('.heic') || name.endsWith('.heif') || type.includes('heic') || type.includes('heif')) return true;
+  if (view.byteLength < 12 || readAscii(view, 4, 4) !== 'ftyp') return false;
+  const major = readAscii(view, 8, 4);
+  return ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(major);
+}
+
+function findTiffHeader(view) {
+  return findTiffHeaderInRange(view, 0, view.byteLength);
+}
+
+function findTiffHeaderInRange(view, start, end) {
+  const safeStart = Math.max(0, start);
+  const safeEnd = Math.min(view.byteLength, end);
+  for (let offset = safeStart; offset + 8 <= safeEnd; offset += 1) {
+    const little = view.getUint8(offset) === 0x49 &&
+      view.getUint8(offset + 1) === 0x49 &&
+      view.getUint16(offset + 2, true) === 42;
+    const big = view.getUint8(offset) === 0x4d &&
+      view.getUint8(offset + 1) === 0x4d &&
+      view.getUint16(offset + 2, false) === 42;
+    if (little || big) return offset;
+  }
+  return -1;
 }
 
 function readTiff(view, tiffStart) {
@@ -165,12 +719,7 @@ function readTiff(view, tiffStart) {
   return {
     dateTime: root[TAG_DATE_TIME],
     dateTimeOriginal: exif[TAG_DATE_ORIGINAL] || exif[TAG_DATE_DIGITIZED],
-    make: root[TAG_MAKE] || '',
-    model: root[TAG_MODEL] || '',
-    aperture: exif[TAG_F_NUMBER],
-    shutter: exif[TAG_EXPOSURE_TIME],
-    iso: exif[TAG_PHOTOGRAPHIC_SENSITIVITY] || exif[TAG_ISO_SPEED],
-    focalLength: exif[TAG_FOCAL_LENGTH],
+    camera: root[TAG_MODEL] || '',
     gpsLatitudeRef: gps[0x0001],
     gpsLatitude: gps[0x0002],
     gpsLongitudeRef: gps[0x0003],
@@ -217,13 +766,12 @@ function readValue(view, tiffStart, valueOffset, type, count, littleEndian) {
   }
 
   if (type === 5) {
-    const values = Array.from({ length: count }, function (_, index) {
+    return Array.from({ length: count }, function (_, index) {
       return {
         numerator: view.getUint32(inlineOffset + index * 8, littleEndian),
         denominator: view.getUint32(inlineOffset + index * 8 + 4, littleEndian),
       };
     });
-    return count === 1 ? values[0] : values;
   }
 
   return null;
@@ -245,14 +793,4 @@ function rationalToNumber(value) {
   if (typeof value === 'number') return value;
   if (!value || !value.denominator) return Number.NaN;
   return value.numerator / value.denominator;
-}
-
-function trimNumber(value, digits) {
-  return Number(value.toFixed(digits)).toString();
-}
-
-function formatCamera(make, model) {
-  const parts = [make, model].map(function (value) { return String(value || '').trim(); }).filter(Boolean);
-  if (parts.length === 2 && parts[1].toLowerCase().startsWith(parts[0].toLowerCase())) return parts[1];
-  return parts.join(' ');
 }
