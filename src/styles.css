@@ -511,7 +511,7 @@ p {
   width: min(100%, 360px);
   height: auto;
   max-width: min(100%, 360px);
-  aspect-ratio: auto;
+  aspect-ratio: var(--canvas-ratio);
 }
 
 .movie-poster-inner {
@@ -530,27 +530,29 @@ p {
 }
 
 .movie-poster-inner.has-photo {
-  display: flex;
-  flex-direction: column;
-  height: auto;
+  display: grid;
+  height: 100%;
+  grid-template-rows: var(--movie-color-ratio) minmax(0, 1fr);
 }
 
 .movie-poster-inner.has-photo .movie-color-card {
   width: 100%;
-  aspect-ratio: var(--movie-card-ratio);
+  height: 100%;
   min-height: 0;
+  aspect-ratio: auto;
 }
 
 .movie-poster-inner.has-photo .movie-photo {
   width: 100%;
-  aspect-ratio: var(--raw-ratio, 1);
+  height: 100%;
   min-height: 0;
+  aspect-ratio: auto;
 }
 
 .movie-poster-inner.has-photo .movie-photo img {
   width: 100%;
-  height: auto;
-  object-fit: contain;
+  height: 100%;
+  object-fit: cover;
 }
 
 .movie-poster-inner.color-top {
@@ -641,7 +643,7 @@ p {
 
 .panel-tabbar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding: 7px 10px 6px;
 }
@@ -878,15 +880,8 @@ p {
   gap: 8px;
 }
 
-.empty-state {
-  display: block;
-  min-height: 70px;
-  padding: 16px;
-  border-radius: var(--control-radius);
-  background: var(--soft);
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
+.photo-grid.is-empty {
+  display: none;
 }
 
 .photo-card {
@@ -1300,6 +1295,7 @@ select:focus,
     height: auto;
     max-width: min(100%, 420px);
     max-height: none;
+    aspect-ratio: var(--canvas-ratio);
   }
 
   .collage-preview:not(.layout-movie-poster) {

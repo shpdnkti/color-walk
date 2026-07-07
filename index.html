@@ -9,7 +9,7 @@
   <body>
     <main class="app-shell editor-shell">
       <header class="editor-header" aria-label="编辑器操作栏">
-        <button class="header-button secondary-action" id="resetButton" type="button"><span class="icon icon-upload" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v10"/><path d="m8 9 4-4 4 4"/><path d="M5 17v2h14v-2"/></svg></span><span>重新上传</span></button>
+        <button class="header-button secondary-action" id="resetButton" type="button"><span class="icon icon-upload" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v10"/><path d="m8 9 4-4 4 4"/><path d="M5 17v2h14v-2"/></svg></span><span>重置</span></button>
         <div class="editor-brand" aria-label="Color Walk">
           <h1>Color Walk</h1>
         </div>
@@ -23,12 +23,12 @@
       <section id="canvasStage" class="canvas-stage" aria-label="实时画布区">
         <div class="stage-meta" aria-live="polite">
           <span id="photoCount">0 张</span>
-          <span id="layoutHint">纯九宫格</span>
+          <span id="layoutHint">电影海报</span>
         </div>
 
         <div id="canvasViewport" class="canvas-viewport" aria-label="可缩放画布视口">
           <div id="canvasTransform" class="canvas-transform">
-            <div id="previewCanvas" class="poster-card collage-preview layout-grid9 font-system"></div>
+            <div id="previewCanvas" class="poster-card collage-preview layout-movie-poster font-system borderless"></div>
           </div>
         </div>
 
@@ -49,14 +49,6 @@
         <div id="controlPanel" class="control-panel-body">
           <div id="panelTabBar" class="panel-tabbar" role="tablist" aria-label="编辑标签"></div>
           <div id="panelContent" class="panel-content">
-            <section class="panel-page" data-panel="layout" aria-label="布局设置">
-              <div class="panel-title">
-                <h2>拼贴结构</h2>
-                <span>4 模板</span>
-              </div>
-              <div id="layoutControls" class="layout-rail" role="listbox" aria-label="拼贴布局"></div>
-            </section>
-
             <section class="panel-page" data-panel="palette" aria-label="色盘设置">
               <div class="panel-title">
                 <h2>整组色盘</h2>
@@ -65,16 +57,13 @@
               <div id="paletteStrip" class="palette-strip"></div>
               <label id="customColorButton" class="custom-color-button" for="customColorInput"><span class="icon icon-picker" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m14 5 5 5"/><path d="M13 6l5 5-8 8H5v-5z"/><path d="M5 19h5"/></svg></span><span>自定义吸色</span></label>
               <input id="customColorInput" class="visually-hidden" type="color" value="#2a4252" />
-              <div id="photoGrid" class="photo-grid empty-state">
-                <p>上传 1 到 9 张照片后，这里会显示主色调和 EXIF 信息。</p>
-              </div>
+              <div id="photoGrid" class="photo-grid is-empty"></div>
             </section>
 
             <section class="panel-page" data-panel="copy" aria-label="Color Walk 文字设置">
               <div class="panel-title">
 <h2>封面文字</h2>
                 <div class="panel-title-actions">
-                  <button id="aiAnalyzeButton" class="text-button compact-text-button" type="button">AI识图</button>
                   <button id="copyGenerateButton" class="text-button compact-text-button" type="button">生成封面文字</button>
                 </div>
               </div>
@@ -98,7 +87,6 @@
                     </select>
                   </label>
                 </div>
-                <button id="copyTextButton" class="floating-copy-button" type="button"><span class="icon icon-copy" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 9h10v10H9z"/><path d="M5 15V5h10"/></svg></span><span>复制文字</span></button>
               </div>
             </section>
 
@@ -124,12 +112,15 @@
                 <div class="ratio-control">
                   <div class="ratio-control-header">
                     <label for="ratioInput">色块比例</label>
-                    <button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button>
+                    <div class="range-header-actions">
+                      <output id="ratioValue" class="range-value" for="ratioInput">50%</output>
+                      <button id="equalRatioButton" class="equal-ratio-button" type="button">等大</button>
+                    </div>
                   </div>
-                  <input id="ratioInput" type="range" min="35" max="65" value="50" />
+                  <input id="ratioInput" type="range" min="35" max="65" value="50" data-range-output="#ratioValue" data-range-unit="%" />
                 </div>
                 <label class="toggle-field">
-                  <span>边距切换 Border-less</span>
+                  <span>无边距铺满</span>
                   <input id="borderlessInput" type="checkbox" checked />
                 </label>
                 <label>
@@ -169,6 +160,6 @@
         bindRangeValueOutputs();
       }());
     </script>
-    <script type="module" src="src/app.js?v=20260706-slider-values-live"></script>
+    <script type="module" src="src/app.js?v=20260707-ratio-refit"></script>
   </body>
 </html>

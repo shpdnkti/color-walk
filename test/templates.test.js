@@ -47,9 +47,9 @@ test('omits unavailable EXIF and location details without placeholders', () => {
   assert.doesNotMatch(coverText, /undefined|null|NaN/);
 });
 
-test('provides layout definitions with required fields', () => {
+test('provides only the movie poster layout definition', () => {
   assert.ok(Array.isArray(layoutDefinitions));
-  assert.equal(layoutDefinitions.length, 5);
+  assert.equal(layoutDefinitions.length, 1);
 
   for (const layout of layoutDefinitions) {
     assert.equal(typeof layout.id, 'string');
@@ -64,22 +64,22 @@ test('provides layout definitions with required fields', () => {
 
   assert.deepEqual(
     layoutDefinitions.map((layout) => layout.label),
-    ['电影海报', '纯九宫格', '上下结构', '杂志拼贴', '色卡海报'],
+    ['电影海报'],
   );
 
   assert.ok(layoutDefinitions.every((layout) => typeof layout.icon === 'string' && layout.icon.length > 0));
-  assert.ok(layoutDefinitions.some((layout) => layout.id === 'movie-poster' && layout.label === '电影海报'));
+  assert.equal(layoutDefinitions[0].id, 'movie-poster');
 });
 
 test('provides bottom editor panel definitions from the design spec', () => {
   assert.deepEqual(
     panelDefinitions.map((panel) => panel.id),
-    ['layout', 'palette', 'copy', 'style'],
+    ['palette', 'copy', 'style'],
   );
 
   assert.deepEqual(
     panelDefinitions.map((panel) => panel.label),
-    ['布局', '色盘', '文案', '样式'],
+    ['色盘', '文案', '样式'],
   );
 
   assert.ok(panelDefinitions.every((panel) => typeof panel.icon === 'string' && panel.icon.length > 0));

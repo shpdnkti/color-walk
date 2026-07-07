@@ -46,6 +46,9 @@ try {
   await page.goto('http://127.0.0.1:' + port + '/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(function () { localStorage.clear(); });
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(function () {
+    return document.querySelector('#previewCanvas')?.classList.contains('layout-movie-poster');
+  });
 
   await uploadGeneratedPhoto(page);
   await page.waitForFunction(function () {
@@ -56,8 +59,8 @@ try {
     const colorInput = document.querySelector('#customColorInput');
     colorInput.value = '#336699';
     colorInput.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelector('#titleInput').value = 'Export Preview Smoke';
-    document.querySelector('#titleInput').dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#coverTextInput').value = 'Export Preview Smoke';
+    document.querySelector('#coverTextInput').dispatchEvent(new Event('input', { bubbles: true }));
   });
 
   const preview = await readPreviewProbe(page);

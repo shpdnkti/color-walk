@@ -26,7 +26,7 @@ const outputRatioConfig = {
 
 const state = {
   photos: [],
-  selectedLayout: 'grid9',
+  selectedLayout: 'movie-poster',
   activePanel: 'copy',
   customColor: '#2a4252',
   movieColorOnTop: true,
@@ -87,9 +87,7 @@ const els = {
   layoutHint: document.querySelector('#layoutHint'),
   panelTabBar: document.querySelector('#panelTabBar'),
   panelContent: document.querySelector('#panelContent'),
-  aiAnalyzeButton: document.querySelector('#aiAnalyzeButton'),
   copyGenerateButton: document.querySelector('#copyGenerateButton'),
-  copyTextButton: document.querySelector('#copyTextButton'),
   customColorButton: document.querySelector('#customColorButton'),
   customColorInput: document.querySelector('#customColorInput'),
   coverTextInput: document.querySelector('#coverTextInput'),
@@ -103,6 +101,7 @@ const els = {
   ratioResolution: document.querySelector('#ratioResolution'),
   fontSizeInput: document.querySelector('#fontSizeInput'),
   fontSizeValue: document.querySelector('#fontSizeValue'),
+  ratioValue: document.querySelector('#ratioValue'),
   fontSelect: document.querySelector('#fontSelect'),
   canvasViewport: document.querySelector('#canvasViewport'),
   canvasTransform: document.querySelector('#canvasTransform'),
@@ -121,7 +120,6 @@ init();
 
 async function init() {
   renderPanelTabs();
-  renderLayoutControls();
   renderRatioPresets();
   bindEvents();
   applyStyleControls();
@@ -138,13 +136,7 @@ function bindEvents() {
   els.resetButton.addEventListener('click', handleResetUpload);
   els.stashButton.addEventListener('click', stashDraft);
   els.clearDraftButton.addEventListener('click', clearSavedDraft);
-  els.aiAnalyzeButton.addEventListener('click', analyzePhotosWithAI);
-  els.copyGenerateButton.addEventListener('click', function () {
-    state.copyDirty = false;
-    seedCoverText(true);
-    renderPreview();
-  });
-  els.copyTextButton.addEventListener('click', copyCurrentText);
+  els.copyGenerateButton.addEventListener('click', generateCoverTextAction);
   els.customColorInput.addEventListener('input', function () {
     state.customColor = els.customColorInput.value;
     renderPreview();
@@ -366,14 +358,29 @@ function writeGeocodeCache(cache) {
   }
 }
 
-async function analyzePhotosWithAI() {
+async function generateCoverTextAction() {
+  state.copyDirty = false;
   if (!state.photos.length) {
-    els.exportStatus.textContent = '请先上传图片，再使用 AI 识图。';
+    seedCoverText(true);
+    renderPreview();
+    scheduleDraftSave();
+    els.exportStatus.textContent = '已生成基础封面文字。';
     return;
   }
 
-  els.aiAnalyzeButton.disabled = true;
-  els.exportStatus.textContent = 'AI 正在识别图片内容...';
+  await analyzePhotosWithAI(true);
+}
+
+async function analyzePhotosWithAI(fallbackToGenerated) {
+  if (!state.photos.length) {
+    seedCoverText(true);
+    renderPreview();
+    els.exportStatus.textContent = '已生成基础封面文字。';
+    return;
+  }
+
+  els.copyGenerateButton.disabled = true;
+  els.exportStatus.textContent = '正在生成封面文字...';
   try {
     const metadata = getPrimaryMetadata();
     const response = await fetch('/api/analyze-image', {
@@ -402,9 +409,18 @@ async function analyzePhotosWithAI() {
 
     applyVisionInsight(payload.insight || {});
   } catch (error) {
-    els.exportStatus.textContent = getAiErrorMessage(error);
+    if (fallbackToGenerated) {
+      state.visionInsight = null;
+      state.copyDirty = false;
+      seedCoverText(true);
+      renderPreview();
+      scheduleDraftSave();
+      els.exportStatus.textContent = '已生成基础封面文字，AI 识图暂不可用。';
+    } else {
+      els.exportStatus.textContent = getAiErrorMessage(error);
+    }
   } finally {
-    els.aiAnalyzeButton.disabled = false;
+    els.copyGenerateButton.disabled = false;
   }
 }
 
@@ -536,6 +552,7 @@ function setOutputRatio(id) {
   state.style.outputRatio = id;
   renderRatioPresets();
   renderPreview();
+  requestAnimationFrame(function () { fitCanvasToViewport(true); });
   els.exportStatus.textContent = '输出比例已切换为 ' + id + '。';
 }
 
@@ -556,6 +573,7 @@ function setPreviewVar(name, value) {
 }
 
 function renderLayoutControls() {
+  if (!els.layoutControls) return;
   els.layoutControls.innerHTML = '';
   layoutDefinitions.forEach(function (layout) {
     const button = document.createElement('button');
@@ -782,8 +800,8 @@ function renderPhotos() {
   els.photoGrid.innerHTML = '';
 
   if (!state.photos.length) {
-    els.photoGrid.className = 'photo-grid empty-state';
-    els.photoGrid.innerHTML = '<p>上传 1 到 9 张照片后，这里会显示主色调和 EXIF 信息。</p>';
+    els.photoGrid.className = 'photo-grid is-empty';
+    els.photoGrid.innerHTML = '';
     return;
   }
 
@@ -852,7 +870,20 @@ function createPhotoCropControls(photo) {
   controls.className = 'photo-crop-controls';
   controls.dataset.photoId = photo.id;
   controls.setAttribute('aria-label', '调整 ' + photo.fileName + ' 裁切');
-  controls.addEventListener('pointerdown', stopPhotoCardControlEvent);
+  controls.draggable = false;
+  controls.addEventListener('pointerdown', function (event) {
+    stopPhotoCardControlEvent(event);
+    setPhotoCardDragEnabled(controls, false);
+    restorePhotoCardDragOnPointerEnd(controls);
+  });
+  controls.addEventListener('pointerup', function (event) {
+    stopPhotoCardControlEvent(event);
+    setPhotoCardDragEnabled(controls, true);
+  });
+  controls.addEventListener('pointercancel', function (event) {
+    stopPhotoCardControlEvent(event);
+    setPhotoCardDragEnabled(controls, true);
+  });
   controls.addEventListener('dragstart', stopPhotoCardControlEvent);
 
   const field = document.createElement('label');
@@ -910,7 +941,24 @@ function createPhotoCropButton(photo, action, label, ariaLabel) {
   return button;
 }
 
+function setPhotoCardDragEnabled(element, enabled) {
+  const card = element.closest('.photo-card');
+  if (!card) return;
+  card.draggable = Boolean(enabled);
+}
+
+function restorePhotoCardDragOnPointerEnd(controls) {
+  const restore = function () {
+    setPhotoCardDragEnabled(controls, true);
+    window.removeEventListener('pointerup', restore);
+    window.removeEventListener('pointercancel', restore);
+  };
+  window.addEventListener('pointerup', restore, { once: true });
+  window.addEventListener('pointercancel', restore, { once: true });
+}
+
 function stopPhotoCardControlEvent(event) {
+  if (event.type === 'dragstart' && event.cancelable) event.preventDefault();
   event.stopPropagation();
 }
 
@@ -1378,6 +1426,7 @@ function applyStyleControls() {
   setPreviewVar('--text-font-size', state.style.fontSize + 'px');
   setPreviewVar('--movie-color-ratio', state.style.ratio + '%');
   setPreviewVar('--movie-card-ratio', String(getMovieCardRatio()));
+  syncRangeValueOutputs();
   els.previewCanvas.classList.toggle('borderless', borderlessMovie);
   els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
   els.previewCanvas.classList.add('font-' + state.style.font);
@@ -1386,6 +1435,7 @@ function applyStyleControls() {
 
 function syncRangeValueOutputs() {
   els.fontSizeValue.textContent = state.style.fontSize + 'px';
+  els.ratioValue.textContent = state.style.ratio + '%';
 }
 
 function getMovieCardRatio() {
@@ -1462,8 +1512,8 @@ async function restoreDraft() {
   if (!draft) return false;
   state.restoringDraft = true;
   try {
-    state.selectedLayout = draft.selectedLayout;
-    state.activePanel = draft.activePanel;
+    state.selectedLayout = normalizeSelectedLayout(draft.selectedLayout);
+    state.activePanel = normalizeActivePanel(draft.activePanel);
     state.customColor = draft.customColor;
     state.movieColorOnTop = draft.movieColorOnTop;
     state.paletteOrder = draft.paletteOrder;
@@ -1479,7 +1529,6 @@ async function restoreDraft() {
       state.photoTransforms.set(photo.id, photo.transform);
     }
     renderPanelTabs();
-    renderLayoutControls();
     renderRatioPresets();
     syncStyleInputs();
     applyCanvasViewport();
@@ -1500,45 +1549,6 @@ function syncStyleInputs() {
   els.fontSizeInput.value = String(state.style.fontSize);
   els.fontSelect.value = state.style.font;
   applyStyleControls();
-}
-
-async function copyCurrentText() {
-  const copied = await copyTextToClipboard(getCurrentCoverText());
-  els.exportStatus.textContent = copied ? '文案已复制。' : '复制失败，请手动选择文本复制。';
-}
-
-async function copyTextToClipboard(text) {
-  try {
-    if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable');
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (error) {
-    return copyTextWithSelectionFallback(text);
-  }
-}
-
-function copyTextWithSelectionFallback(text) {
-  if (typeof document.execCommand !== 'function') return false;
-
-  const activeElement = document.activeElement;
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'fixed';
-  textarea.style.inset = '0 auto auto -9999px';
-  document.body.append(textarea);
-  textarea.focus();
-  textarea.select();
-  textarea.setSelectionRange(0, textarea.value.length);
-
-  try {
-    return document.execCommand('copy');
-  } catch (error) {
-    return false;
-  } finally {
-    textarea.remove();
-    if (activeElement && typeof activeElement.focus === 'function') activeElement.focus();
-  }
 }
 
 async function exportPng() {
@@ -1615,7 +1625,25 @@ function clonePreviewForExport(width, height) {
   clone.style.maxHeight = 'none';
   clone.style.boxShadow = 'none';
   clone.style.transform = 'none';
+  copyPreviewExportVars(clone);
   return clone;
+}
+
+function copyPreviewExportVars(target) {
+  const rootStyles = getComputedStyle(document.documentElement);
+  [
+    '--canvas-ratio',
+    '--preview-color',
+    '--image-radius',
+    '--image-padding',
+    '--text-font-size',
+    '--movie-text-color',
+    '--movie-color-ratio',
+    '--movie-card-ratio',
+  ].forEach(function (name) {
+    const value = rootStyles.getPropertyValue(name);
+    if (value) target.style.setProperty(name, value.trim());
+  });
 }
 
 function collectExportCssText() {
@@ -1629,15 +1657,7 @@ function collectExportCssText() {
 }
 
 function getMoviePosterExportHeight(width) {
-  const photo = state.photos[0];
-  if (!photo) return getOutputExportHeight(width);
-  const margin = state.style.borderless ? 0 : 72;
-  const posterWidth = width - margin * 2;
-  const colorWeight = clamp(state.style.ratio, 1, 99);
-  const imageWeight = 100 - colorWeight;
-  const imageHeight = posterWidth / photo.ratio;
-  const colorHeight = imageHeight * (colorWeight / imageWeight);
-  return Math.round(colorHeight + imageHeight + margin * 2);
+  return getOutputExportHeight(width);
 }
 
 
@@ -1687,7 +1707,7 @@ function drawExportMoviePoster(ctx, width, height, mainColor) {
   if (radius > 0) roundedClip(ctx, posterX, posterY, posterW, posterH, radius);
   ctx.fillStyle = mainColor;
   ctx.fillRect(posterX, colorY, posterW, colorH);
-  drawPhotoContain(ctx, photo, posterX, imageY, posterW, imageH, '#111a24');
+  drawPhotoCover(ctx, photo, posterX, imageY, posterW, imageH, '#111a24');
   ctx.restore();
 
   drawExportCoverText(ctx, { x: posterX, y: colorY, w: posterW, h: colorH }, true, 'center');
@@ -1879,6 +1899,22 @@ function drawPhotoContain(ctx, photo, x, y, w, h, background) {
   drawImageContain(ctx, photo.image, x, y, w, h, background, getPhotoTransform(photo.id));
 }
 
+function drawPhotoCover(ctx, photo, x, y, w, h, background) {
+  drawImageCoverTransform(ctx, photo.image, x, y, w, h, background, getPhotoTransform(photo.id));
+}
+
+function drawImageCoverTransform(ctx, image, x, y, w, h, background, transform) {
+  const photoTransform = transform || { scale: 1, x: 0, y: 0 };
+  ctx.fillStyle = background || '#f3f4f6';
+  ctx.fillRect(x, y, w, h);
+  const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight) * photoTransform.scale;
+  const dw = image.naturalWidth * scale;
+  const dh = image.naturalHeight * scale;
+  const dx = x + (w - dw) / 2 + photoTransform.x * w;
+  const dy = y + (h - dh) / 2 + photoTransform.y * h;
+  ctx.drawImage(image, dx, dy, dw, dh);
+}
+
 function drawImageContain(ctx, image, x, y, w, h, background, transform) {
   const photoTransform = transform || { scale: 1, x: 0, y: 0 };
   ctx.fillStyle = background || '#f3f4f6';
@@ -1889,6 +1925,14 @@ function drawImageContain(ctx, image, x, y, w, h, background, transform) {
   const dx = x + (w - dw) / 2 + photoTransform.x * w;
   const dy = y + (h - dh) / 2 + photoTransform.y * h;
   ctx.drawImage(image, dx, dy, dw, dh);
+}
+
+function normalizeSelectedLayout(id) {
+  return layoutDefinitions.some(function (layout) { return layout.id === id; }) ? id : 'movie-poster';
+}
+
+function normalizeActivePanel(id) {
+  return panelDefinitions.some(function (panel) { return panel.id === id; }) ? id : 'copy';
 }
 
 function getSelectedLayout() {
@@ -1946,10 +1990,9 @@ function loadImage(src) {
 }
 
 function handleResetUpload() {
-  const shouldReset = !state.photos.length || window.confirm('重新上传会清空当前画布，继续吗？');
+  const shouldReset = !state.photos.length || window.confirm('重置会清空当前画布，继续吗？');
   if (!shouldReset) return;
   resetApp();
-  els.fileInput.click();
 }
 
 function resetApp() {
@@ -1977,16 +2020,15 @@ function resetApp() {
   state.viewport.panY = 0;
   state.viewport.isPanning = false;
   state.viewport.pointerId = null;
-  state.selectedLayout = 'grid9';
+  state.selectedLayout = 'movie-poster';
   state.activePanel = 'copy';
   els.coverTextInput.value = '';
   renderPanelTabs();
-  renderLayoutControls();
   renderRatioPresets();
   applyCanvasViewport();
   seedCoverText(true);
   renderAll();
-  els.exportStatus.textContent = '';
+  els.exportStatus.textContent = '画布已重置。';
 }
 
 function revokePhotoUrl(photo) {

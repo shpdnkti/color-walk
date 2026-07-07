@@ -1,10 +1,5 @@
 export const panelDefinitions = [
   {
-    id: 'layout',
-    label: '布局',
-    icon: 'layout',
-  },
-  {
     id: 'palette',
     label: '色盘',
     icon: 'palette',
@@ -28,34 +23,6 @@ export const layoutDefinitions = [
     icon: 'film',
     description: '纯色字卡与无边距满铺大图上下拼接，适合电影感旅行封面。',
     className: 'layout-movie-poster',
-  },
-  {
-    id: 'grid9',
-    label: '纯九宫格',
-    icon: 'grid',
-    description: '九张图片等分排列，适合完整记录一次 Color Walk。',
-    className: 'layout-grid9',
-  },
-  {
-    id: 'stacked',
-    label: '上下结构',
-    icon: 'stacked',
-    description: '主图在上、信息在下，保留手机海报的纵向节奏。',
-    className: 'layout-stacked',
-  },
-  {
-    id: 'magazine',
-    label: '杂志拼贴',
-    icon: 'magazine',
-    description: '主图、辅图和色条错落组合，适合更有编辑感的拼贴。',
-    className: 'layout-magazine',
-  },
-  {
-    id: 'color-card-poster',
-    label: '色卡海报',
-    icon: 'swatches',
-    description: '以单张大图、EXIF 信息、色盘和文案生成小红书封面。',
-    className: 'layout-color-card-poster',
   },
 ];
 
