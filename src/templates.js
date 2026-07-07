@@ -23,6 +23,13 @@ export const panelDefinitions = [
 
 export const layoutDefinitions = [
   {
+    id: 'movie-poster',
+    label: '电影海报',
+    icon: 'film',
+    description: '纯色字卡与无边距满铺大图上下拼接，适合电影感旅行封面。',
+    className: 'layout-movie-poster',
+  },
+  {
     id: 'grid9',
     label: '纯九宫格',
     icon: 'grid',

@@ -22,6 +22,7 @@ const state = {
   selectedLayout: 'grid9',
   activePanel: 'copy',
   customColor: '#2a4252',
+  movieColorOnTop: true,
   copyDirty: false,
   locationCache: new Map(),
   photoTransforms: new Map(),
@@ -50,6 +51,8 @@ const state = {
   style: {
     radius: 0,
     padding: 0,
+    ratio: 50,
+    borderless: true,
     fontSize: 24,
     font: 'system',
     outputRatio: '3:4',
@@ -73,6 +76,9 @@ const els = {
   customColorButton: document.querySelector('#customColorButton'),
   customColorInput: document.querySelector('#customColorInput'),
   coverTextInput: document.querySelector('#coverTextInput'),
+  ratioInput: document.querySelector('#ratioInput'),
+  equalRatioButton: document.querySelector('#equalRatioButton'),
+  borderlessInput: document.querySelector('#borderlessInput'),
   radiusInput: document.querySelector('#radiusInput'),
   paddingInput: document.querySelector('#paddingInput'),
   ratioPresetBar: document.querySelector('#ratioPresetBar'),
@@ -125,6 +131,7 @@ function bindEvents() {
   els.zoomInButton.addEventListener('click', function () { setCanvasZoom(state.viewport.zoom + 0.1); });
   els.zoomLevelButton.addEventListener('click', function () { resetCanvasViewport(false); });
   els.zoomFitButton.addEventListener('click', function () { fitCanvasToViewport(false); });
+  els.equalRatioButton.addEventListener('click', function () { setEqualMovieRatio(); });
   els.ratioPresetBar.addEventListener('click', function (event) {
     const button = event.target.closest('button[data-ratio]');
     if (!button) return;
@@ -137,19 +144,53 @@ function bindEvents() {
     renderPreview();
   });
 
-  [els.radiusInput, els.paddingInput, els.fontSizeInput].forEach(function (input) {
+  [els.radiusInput, els.paddingInput, els.fontSizeInput, els.ratioInput].forEach(function (input) {
     input.addEventListener('input', function () {
       state.style.radius = Number(els.radiusInput.value);
       state.style.padding = Number(els.paddingInput.value);
+      state.style.ratio = Number(els.ratioInput.value);
       state.style.fontSize = Number(els.fontSizeInput.value);
+      if ((state.style.radius > 0 || state.style.padding > 0) && state.style.borderless) {
+        state.style.borderless = false;
+        els.borderlessInput.checked = false;
+      }
       applyStyleControls();
+      renderPreview();
     });
+  });
+
+  els.borderlessInput.addEventListener('change', function () {
+    state.style.borderless = els.borderlessInput.checked;
+    if (state.style.borderless) {
+      state.style.radius = 0;
+      state.style.padding = 0;
+      els.radiusInput.value = '0';
+      els.paddingInput.value = '0';
+    }
+    applyStyleControls();
+    renderPreview();
   });
 
   els.fontSelect.addEventListener('input', function () {
     state.style.font = els.fontSelect.value;
     applyStyleControls();
+    renderPreview();
   });
+}
+
+function toggleMovieColorPosition() {
+  if (state.selectedLayout !== 'movie-poster') return;
+  state.movieColorOnTop = !state.movieColorOnTop;
+  renderPreview();
+  els.exportStatus.textContent = state.movieColorOnTop ? '色块已切换到上方。' : '色块已切换到下方。';
+}
+
+function setEqualMovieRatio() {
+  els.ratioInput.value = '50';
+  state.style.ratio = 50;
+  applyStyleControls();
+  renderPreview();
+  els.exportStatus.textContent = '已设为上下等大。';
 }
 
 async function handleFiles(event) {
@@ -342,6 +383,7 @@ function renderLayoutControls() {
       if (!state.copyDirty) seedCoverText(true);
       renderLayoutControls();
       renderPreview();
+      applyStyleControls();
     });
     if (layout.id === state.selectedLayout) button.classList.add('active');
     els.layoutControls.append(button);
@@ -350,6 +392,7 @@ function renderLayoutControls() {
 
 function getLayoutGlyph(id) {
   const glyphs = {
+    'movie-poster': '<i class="wide swatch"></i><i class="wide"></i>',
     grid9: '<i></i><i></i><i></i><i></i><i></i><i></i>',
     stacked: '<i class="wide"></i><i class="wide small"></i>',
     magazine: '<i class="tall"></i><i></i><i></i>',
@@ -373,6 +416,11 @@ function getIconSvg(name) {
 }
 
 function bindCanvasViewportEvents() {
+  els.canvasViewport.addEventListener('dblclick', function (event) {
+    if (isTypingTarget(event.target)) return;
+    toggleMovieColorPosition();
+  });
+
   els.canvasViewport.addEventListener('wheel', function (event) {
     if (!event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
@@ -613,19 +661,32 @@ function renderPalette() {
 function renderPreview() {
   const layout = getSelectedLayout();
   const previewColor = state.customColor || getMainColorHex() || '#2a4252';
+  const isMoviePoster = layout.id === 'movie-poster';
+  const isBorderless = isMoviePoster && state.style.borderless;
+  const hasMoviePhoto = isMoviePoster && Boolean(state.photos[0]);
   els.layoutHint.textContent = layout.label;
-  els.previewCanvas.className = 'poster-card collage-preview ' + layout.className + ' font-' + state.style.font;
+  els.previewCanvas.className = 'poster-card collage-preview ' + layout.className + ' font-' + state.style.font + (isBorderless ? ' borderless' : '') + (hasMoviePhoto ? ' has-photo' : '');
   applyOutputRatioVars();
-  const resolvedPadding = state.style.padding;
-  const resolvedRadius = state.style.radius;
+  const resolvedPadding = isBorderless ? 0 : state.style.padding;
+  const resolvedRadius = isBorderless ? 0 : state.style.radius;
   setPreviewVar('--preview-color', previewColor);
   setPreviewVar('--image-radius', resolvedRadius + 'px');
   setPreviewVar('--image-padding', resolvedPadding + 'px');
   setPreviewVar('--text-font-size', state.style.fontSize + 'px');
+  setPreviewVar('--movie-text-color', getReadableTextColor(previewColor));
+  setPreviewVar('--movie-color-ratio', state.style.ratio + '%');
+  setPreviewVar('--movie-card-ratio', String(getMovieCardRatio()));
   els.previewCanvas.innerHTML = '';
 
   const inner = document.createElement('div');
-  inner.className = 'preview-inner';
+  inner.className = isMoviePoster ? 'movie-poster-inner' : 'preview-inner';
+  if (hasMoviePhoto) inner.classList.add('has-photo');
+
+  if (isMoviePoster) {
+    renderMoviePoster(inner);
+    els.previewCanvas.append(inner);
+    return;
+  }
 
   const swatches = createPreviewSwatches();
 
@@ -640,6 +701,21 @@ function renderPreview() {
   }
 
   els.previewCanvas.append(inner);
+}
+
+function renderMoviePoster(inner) {
+  inner.classList.toggle('color-top', state.movieColorOnTop);
+  inner.classList.toggle('color-bottom', !state.movieColorOnTop);
+
+  const colorCard = document.createElement('section');
+  colorCard.className = 'movie-color-card';
+  colorCard.append(createColorWalkTextOverlay('center'));
+
+  const image = createPreviewImage();
+  image.classList.add('movie-photo');
+
+  if (state.movieColorOnTop) inner.append(colorCard, image);
+  else inner.append(image, colorCard);
 }
 
 function createPreviewSwatches() {
@@ -861,11 +937,27 @@ function clampPhotoTransform(transform) {
 
 function applyStyleControls() {
   applyOutputRatioVars();
-  setPreviewVar('--image-radius', state.style.radius + 'px');
-  setPreviewVar('--image-padding', state.style.padding + 'px');
+  const borderlessMovie = state.selectedLayout === 'movie-poster' && state.style.borderless;
+  els.radiusInput.disabled = borderlessMovie;
+  els.paddingInput.disabled = borderlessMovie;
+  const resolvedPadding = borderlessMovie ? 0 : state.style.padding;
+  const resolvedRadius = borderlessMovie ? 0 : state.style.radius;
+  setPreviewVar('--image-radius', resolvedRadius + 'px');
+  setPreviewVar('--image-padding', resolvedPadding + 'px');
   setPreviewVar('--text-font-size', state.style.fontSize + 'px');
+  setPreviewVar('--movie-color-ratio', state.style.ratio + '%');
+  setPreviewVar('--movie-card-ratio', String(getMovieCardRatio()));
+  els.previewCanvas.classList.toggle('borderless', borderlessMovie);
   els.previewCanvas.classList.remove('font-system', 'font-serif', 'font-hand', 'font-casual');
   els.previewCanvas.classList.add('font-' + state.style.font);
+}
+
+function getMovieCardRatio() {
+  const photo = state.photos[0];
+  if (!photo) return 1;
+  const colorWeight = clamp(state.style.ratio, 1, 99);
+  const imageWeight = 100 - colorWeight;
+  return photo.ratio * (imageWeight / colorWeight);
 }
 
 function stashDraft() {
@@ -900,7 +992,7 @@ async function exportPng() {
   els.exportStatus.textContent = '正在生成 PNG...';
   const canvas = els.exportCanvas;
   canvas.width = 1080;
-  canvas.height = getOutputExportHeight(1080);
+  canvas.height = state.selectedLayout === 'movie-poster' ? getMoviePosterExportHeight(1080) : getOutputExportHeight(1080);
   const ctx = canvas.getContext('2d');
   drawExport(ctx, canvas.width, canvas.height);
 
@@ -919,6 +1011,18 @@ async function exportPng() {
   }, 'image/png', 0.95);
 }
 
+function getMoviePosterExportHeight(width) {
+  const photo = state.photos[0];
+  if (!photo) return getOutputExportHeight(width);
+  const margin = state.style.borderless ? 0 : 72;
+  const posterWidth = width - margin * 2;
+  const colorWeight = clamp(state.style.ratio, 1, 99);
+  const imageWeight = 100 - colorWeight;
+  const imageHeight = posterWidth / photo.ratio;
+  const colorHeight = imageHeight * (colorWeight / imageWeight);
+  return Math.round(colorHeight + imageHeight + margin * 2);
+}
+
 function getOutputExportHeight(width) {
   const preset = getSelectedRatioPreset();
   return Math.round(width * (preset.height / preset.width));
@@ -928,6 +1032,11 @@ function drawExport(ctx, width, height) {
   const layout = state.selectedLayout;
   const mainColor = state.customColor || getMainColorHex() || '#2a4252';
   ctx.clearRect(0, 0, width, height);
+
+  if (layout === 'movie-poster') {
+    drawExportMoviePoster(ctx, width, height, mainColor);
+    return;
+  }
 
   ctx.fillStyle = layout === 'color-card-poster' ? mainColor : '#ffffff';
   ctx.fillRect(0, 0, width, height);
@@ -939,6 +1048,31 @@ function drawExport(ctx, width, height) {
   if (layout === 'color-card-poster') textFrame = drawExportPoster(ctx, mainColor);
 
   drawExportCoverText(ctx, textFrame || { x: 72, y: 180, w: 936, h: 936 }, layout === 'color-card-poster');
+}
+
+function drawExportMoviePoster(ctx, width, height, mainColor) {
+  const photo = state.photos[0];
+  const margin = state.style.borderless ? 0 : 72;
+  const posterX = margin;
+  const posterY = margin;
+  const posterW = width - margin * 2;
+  const posterH = height - margin * 2;
+  const colorH = Math.round(posterH * (clamp(state.style.ratio, 1, 99) / 100));
+  const imageH = posterH - colorH;
+  const colorY = state.movieColorOnTop ? posterY : posterY + imageH;
+  const imageY = state.movieColorOnTop ? posterY + colorH : posterY;
+  const radius = state.style.borderless ? 0 : state.style.radius;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.save();
+  if (radius > 0) roundedClip(ctx, posterX, posterY, posterW, posterH, radius);
+  ctx.fillStyle = mainColor;
+  ctx.fillRect(posterX, colorY, posterW, colorH);
+  drawPhotoContain(ctx, photo, posterX, imageY, posterW, imageH, '#111a24');
+  ctx.restore();
+
+  drawExportCoverText(ctx, { x: posterX, y: colorY, w: posterW, h: colorH }, true, 'center');
 }
 
 function drawExportGrid(ctx) {
@@ -975,7 +1109,7 @@ function drawExportPoster(ctx, mainColor) {
   return frame;
 }
 
-function drawExportCoverText(ctx, frame, onTint) {
+function drawExportCoverText(ctx, frame, onTint, align) {
   const text = getCurrentCoverText() || generateCoverText({
     dominantColor: getMainColorHex() || '#f05f87',
     paletteColors: getPaletteColors(),
@@ -990,13 +1124,27 @@ function drawExportCoverText(ctx, frame, onTint) {
   const lines = text.split('\n').map(function (line) { return line.trim(); }).filter(Boolean).slice(0, 7);
 
   ctx.save();
+  ctx.font = '400 ' + fontSize + 'px ' + getExportFontFamily();
+
+  if (align === 'center') {
+    ctx.fillStyle = getReadableTextColor(state.customColor || getMainColorHex() || '#2a4252');
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    const centerX = frame.x + frame.w / 2;
+    const startY = frame.y + frame.h / 2 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach(function (line, index) {
+      wrapCenteredText(ctx, line, centerX, startY + index * lineHeight, maxWidth, lineHeight, 2);
+    });
+    ctx.restore();
+    return;
+  }
+
   ctx.fillStyle = onTint ? 'rgba(255,255,255,0.94)' : 'rgba(255,255,255,0.94)';
   ctx.shadowColor = 'rgba(0,0,0,0.32)';
   ctx.shadowBlur = 18;
   ctx.shadowOffsetY = 2;
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
-  ctx.font = '400 ' + fontSize + 'px ' + getExportFontFamily();
   lines.forEach(function (line, index) {
     wrapText(ctx, line, left, top + fontSize + index * lineHeight, maxWidth, lineHeight, 2);
   });
@@ -1153,7 +1301,12 @@ function resetApp() {
   state.imageGesture.pinchStartDistance = 0;
   state.copyDirty = false;
   state.customColor = '#2a4252';
+  state.movieColorOnTop = true;
+  state.style.ratio = 50;
+  state.style.borderless = true;
   state.style.outputRatio = '3:4';
+  els.ratioInput.value = '50';
+  els.borderlessInput.checked = true;
   state.viewport.zoom = 1;
   state.viewport.panX = 0;
   state.viewport.panY = 0;

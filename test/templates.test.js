@@ -49,7 +49,7 @@ test('omits unavailable EXIF and location details without placeholders', () => {
 
 test('provides layout definitions with required fields', () => {
   assert.ok(Array.isArray(layoutDefinitions));
-  assert.equal(layoutDefinitions.length, 4);
+  assert.equal(layoutDefinitions.length, 5);
 
   for (const layout of layoutDefinitions) {
     assert.equal(typeof layout.id, 'string');
@@ -64,11 +64,11 @@ test('provides layout definitions with required fields', () => {
 
   assert.deepEqual(
     layoutDefinitions.map((layout) => layout.label),
-    ['纯九宫格', '上下结构', '杂志拼贴', '色卡海报'],
+    ['电影海报', '纯九宫格', '上下结构', '杂志拼贴', '色卡海报'],
   );
 
   assert.ok(layoutDefinitions.every((layout) => typeof layout.icon === 'string' && layout.icon.length > 0));
-  assert.ok(!layoutDefinitions.some((layout) => layout.id === 'movie-poster' || layout.label === '电影海报'));
+  assert.ok(layoutDefinitions.some((layout) => layout.id === 'movie-poster' && layout.label === '电影海报'));
 });
 
 test('provides bottom editor panel definitions from the design spec', () => {
