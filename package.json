@@ -7,6 +7,7 @@
     "start": "node server.js",
     "test": "node --test",
     "test:export-preview": "node scripts/export-preview-smoke.mjs",
+    "test:image-crop-drag": "COLOR_WALK_RUN_IMAGE_CROP_DRAG=1 node scripts/image-crop-drag-regression.mjs",
     "miniprogram:validate": "node scripts/validate-miniprogram.mjs",
     "miniprogram:preview": "node scripts/upload-miniprogram.mjs preview",
     "miniprogram:upload": "node scripts/upload-miniprogram.mjs upload"

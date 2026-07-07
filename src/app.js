@@ -1266,7 +1266,7 @@ function bindImageTransformEvents(imageWrap, photo) {
       scale: transform.scale + delta,
       x: transform.x,
       y: transform.y,
-    });
+    }, imageWrap);
     applyPhotoTransformToElement(imageWrap, photo.id);
     els.exportStatus.textContent = '图片焦点缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
   }, { passive: false });
@@ -1298,7 +1298,7 @@ function bindImageTransformEvents(imageWrap, photo) {
         scale: state.imageGesture.pinchStartScale * (distance / state.imageGesture.pinchStartDistance),
         x: transform.x,
         y: transform.y,
-      });
+      }, imageWrap);
       applyPhotoTransformToElement(imageWrap, photo.id);
       return;
     }
@@ -1313,7 +1313,7 @@ function bindImageTransformEvents(imageWrap, photo) {
       scale: transform.scale,
       x: transform.x + dx,
       y: transform.y + dy,
-    });
+    }, imageWrap);
     state.imageGesture.lastX = event.clientX;
     state.imageGesture.lastY = event.clientY;
     applyPhotoTransformToElement(imageWrap, photo.id);
@@ -1359,8 +1359,8 @@ function getPhotoTransform(photoId) {
   return state.photoTransforms.get(photoId) || { scale: 1, x: 0, y: 0 };
 }
 
-function setPhotoTransform(photoId, transform) {
-  state.photoTransforms.set(photoId, clampPhotoTransform(transform));
+function setPhotoTransform(photoId, transform, sourceElement) {
+  state.photoTransforms.set(photoId, clampPhotoTransform(transform, photoId, sourceElement));
   applyPhotoTransformToPreviewInstances(photoId);
   syncPhotoCropControls(photoId);
   scheduleDraftSave();
@@ -1389,7 +1389,8 @@ function applyPhotoTransformToPreviewInstances(photoId) {
 }
 
 function applyPhotoTransformToElement(element, photoId) {
-  const transform = getPhotoTransform(photoId);
+  applyPhotoCoverVarsToElement(element, photoId);
+  const transform = clampPhotoTransform(getPhotoTransform(photoId), photoId, element);
   const offsetX = Math.round(transform.x * Math.max(1, element.clientWidth));
   const offsetY = Math.round(transform.y * Math.max(1, element.clientHeight));
   element.style.setProperty('--image-scale', transform.scale.toFixed(3));
@@ -1397,14 +1398,66 @@ function applyPhotoTransformToElement(element, photoId) {
   element.style.setProperty('--image-translate-y', offsetY + 'px');
 }
 
-function clampPhotoTransform(transform) {
+function applyPhotoCoverVarsToElement(element, photoId) {
+  const photo = getPhotoById(photoId);
+  const frameRatio = getPhotoFrameRatio(photoId, element);
+  const ratios = getPhotoCoverRatios(photo, frameRatio);
+  element.style.setProperty('--image-cover-width', ratios.width.toFixed(6));
+  element.style.setProperty('--image-cover-height', ratios.height.toFixed(6));
+}
+
+function clampPhotoTransform(transform, photoId, sourceElement) {
   const scale = clamp(transform.scale || 1, 1, 4);
-  const maxOffset = scale <= 1 ? 0 : Math.min(0.48, (scale - 1) / (scale * 2) + 0.08);
+  const bounds = getPhotoOffsetBounds(photoId, sourceElement, scale);
   return {
     scale,
-    x: scale <= 1 ? 0 : clamp(transform.x || 0, -maxOffset, maxOffset),
-    y: scale <= 1 ? 0 : clamp(transform.y || 0, -maxOffset, maxOffset),
+    x: clamp(transform.x || 0, -bounds.x, bounds.x),
+    y: clamp(transform.y || 0, -bounds.y, bounds.y),
   };
+}
+
+function getPhotoOffsetBounds(photoId, sourceElement, scale) {
+  const photo = getPhotoById(photoId);
+  const frameRatio = getPhotoFrameRatio(photoId, sourceElement);
+  const ratios = getPhotoCoverRatios(photo, frameRatio);
+  return {
+    x: Math.min(0.48, Math.max(0, (ratios.width * scale - 1) / 2)),
+    y: Math.min(0.48, Math.max(0, (ratios.height * scale - 1) / 2)),
+  };
+}
+
+function getPhotoCoverRatios(photo, frameRatio) {
+  const photoRatio = getPhotoAspectRatio(photo);
+  const safeFrameRatio = Number.isFinite(frameRatio) && frameRatio > 0 ? frameRatio : photoRatio;
+  if (!Number.isFinite(photoRatio) || photoRatio <= 0 || !Number.isFinite(safeFrameRatio) || safeFrameRatio <= 0) {
+    return { width: 1, height: 1 };
+  }
+  if (photoRatio > safeFrameRatio) {
+    return { width: photoRatio / safeFrameRatio, height: 1 };
+  }
+  if (photoRatio < safeFrameRatio) {
+    return { width: 1, height: safeFrameRatio / photoRatio };
+  }
+  return { width: 1, height: 1 };
+}
+
+function getPhotoFrameRatio(photoId, sourceElement) {
+  const element = sourceElement || els.previewCanvas.querySelector('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]');
+  if (element) {
+    const width = element.clientWidth;
+    const height = element.clientHeight;
+    if (width > 0 && height > 0) return width / height;
+  }
+  return getPhotoAspectRatio(getPhotoById(photoId));
+}
+
+function getPhotoAspectRatio(photo) {
+  const ratio = Number(photo?.ratio || (photo?.naturalWidth && photo?.naturalHeight ? photo.naturalWidth / photo.naturalHeight : 1));
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+}
+
+function getPhotoById(photoId) {
+  return state.photos.find(function (photo) { return photo.id === photoId; });
 }
 
 function cssEscape(value) {
