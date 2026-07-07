@@ -60,10 +60,39 @@ PREVIEW_PORT=3001 docker compose -f docker-compose.preview.yml up
 docker compose -f docker-compose.preview.yml down
 ```
 
+## 微信小程序
+
+小程序源码位于 `miniprogram/`。在微信开发者工具中选择“导入项目”，项目目录打开仓库根目录，工具会读取根目录的 `project.config.json`，小程序根目录为 `miniprogram/`，默认入口页是 `pages/editor/editor`。
+
+接口地址在 `miniprogram/config.js` 中配置：
+
+```js
+module.exports = {
+  apiBaseUrl: '',
+};
+```
+
+本地联调时可把 `apiBaseUrl` 改成你的 Node 服务地址，例如 `http://localhost:3000`。如果要在小程序真机或 CI 环境访问接口，请使用 HTTPS 域名并在微信公众平台配置合法域名。
+
+CI 使用 `.github/workflows/wechat-miniprogram.yml`。push 和 pull request 会执行 `npm ci`、`npm test` 和 `npm run miniprogram:validate`。手动发布需要在 GitHub Actions 的 workflow dispatch 中选择 `preview` 或 `upload`，并配置以下 Secrets：
+
+- `WECHAT_MINIPROGRAM_APPID`
+- `WECHAT_MINIPROGRAM_PRIVATE_KEY`
+- `WECHAT_MINIPROGRAM_API_BASE_URL`，必须是 HTTPS 地址，用于注入小程序发布包里的 `apiBaseUrl`
+
+可选发布参数包括版本号和说明，对应 `WECHAT_MINIPROGRAM_VERSION` 与 `WECHAT_MINIPROGRAM_DESC`。本地也可以直接运行：
+
+```bash
+npm run miniprogram:validate
+npm install --no-save miniprogram-ci@2.1.31
+WECHAT_MINIPROGRAM_APPID=wx... WECHAT_MINIPROGRAM_PRIVATE_KEY="$(cat private.key)" WECHAT_MINIPROGRAM_API_BASE_URL=https://api.example.com npm run miniprogram:preview
+```
+
 ## 校验
 
 ```bash
 npm test
+npm run miniprogram:validate
 node --check src/app.js src/exif.js src/geocode.js src/draft.js server.js server/vision.js
 docker compose config
 docker compose -f docker-compose.preview.yml config

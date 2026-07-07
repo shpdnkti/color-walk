@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "pages/editor/editor"
+  ],
+  "window": {
+    "navigationBarTitleText": "Color Walk",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f7f4ef"
+  },
+  "sitemapLocation": "sitemap.json"
+}
