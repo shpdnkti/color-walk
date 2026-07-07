@@ -1,0 +1,12 @@
+{
+  "appid": "",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "miniprogram/",
+  "projectname": "Color Walk",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "postcss": true,
+    "minified": true
+  }
+}

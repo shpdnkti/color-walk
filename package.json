@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "test:export-preview": "node scripts/export-preview-smoke.mjs"
+    "test:export-preview": "node scripts/export-preview-smoke.mjs",
+    "miniprogram:validate": "node scripts/validate-miniprogram.mjs",
+    "miniprogram:preview": "node scripts/upload-miniprogram.mjs preview",
+    "miniprogram:upload": "node scripts/upload-miniprogram.mjs upload"
   },
   "devDependencies": {
     "playwright": "^1.61.1"

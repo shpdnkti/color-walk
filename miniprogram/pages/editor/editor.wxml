@@ -1,0 +1,208 @@
+<view class="editor-shell">
+  <view class="editor-header">
+    <button class="header-button secondary-action" bindtap="choosePhotos">重新上传</button>
+    <view class="editor-brand">Color Walk</view>
+    <view class="header-actions">
+      <button class="header-button" bindtap="saveDraft">暂存</button>
+      <button class="header-button primary-action" bindtap="exportPng">导出图片</button>
+    </view>
+  </view>
+
+  <view class="canvas-stage">
+    <view class="stage-meta">
+      <text>{{photos.length}} 张</text>
+      <text>{{layoutHint}}</text>
+    </view>
+
+    <view
+      class="canvas-viewport"
+      bindtouchstart="handleCanvasTouchStart"
+      bindtouchmove="handleCanvasTouchMove"
+      bindtouchend="handleCanvasTouchEnd"
+      bindtouchcancel="handleCanvasTouchEnd"
+    >
+      <view
+        class="canvas-transform"
+        style="transform: translate({{viewport.panX}}px, {{viewport.panY}}px) scale({{viewport.zoom}});"
+      >
+        <view class="poster-card {{previewClass}}" style="{{previewStyle}}">
+          <view wx:if="{{selectedLayout === 'movie-poster'}}" class="movie-poster-inner {{movieColorOnTop ? 'color-top' : 'color-bottom'}} {{primaryPhoto ? 'has-photo' : ''}}">
+            <view wx:if="{{movieColorOnTop}}" class="movie-color-card">
+              <text class="movie-title">{{fields.title || 'Color Walk'}}</text>
+            </view>
+            <view
+              class="preview-image movie-photo {{primaryPhoto ? 'has-photo' : ''}}"
+              data-photo-id="{{primaryPhoto.id}}"
+              bindtouchstart="handlePhotoTouchStart"
+              bindtouchmove="handlePhotoTouchMove"
+              bindtouchend="handlePhotoTouchEnd"
+              bindtouchcancel="handlePhotoTouchEnd"
+            >
+              <image wx:if="{{primaryPhoto}}" src="{{primaryPhoto.src}}" mode="aspectFit" style="{{primaryPhoto.transformStyle}}" />
+              <text wx:else>上传图片</text>
+            </view>
+            <view wx:if="{{!movieColorOnTop}}" class="movie-color-card">
+              <text class="movie-title">{{fields.title || 'Color Walk'}}</text>
+            </view>
+          </view>
+
+          <view wx:else class="preview-inner">
+            <view class="preview-gallery layout-{{selectedLayout}}">
+              <view
+                wx:for="{{previewSlots}}"
+                wx:key="slotId"
+                class="preview-image {{item.photo ? 'has-photo' : ''}}"
+                data-photo-id="{{item.photo.id}}"
+                bindtouchstart="handlePhotoTouchStart"
+                bindtouchmove="handlePhotoTouchMove"
+                bindtouchend="handlePhotoTouchEnd"
+                bindtouchcancel="handlePhotoTouchEnd"
+              >
+                <image wx:if="{{item.photo}}" src="{{item.photo.src}}" mode="aspectFit" style="{{item.photo.transformStyle}}" />
+                <text wx:else>上传图片</text>
+              </view>
+            </view>
+            <view class="preview-meta">
+              <text>{{displayDate}}</text>
+              <text>{{fields.place || '未设置地点'}}</text>
+              <text>{{mainColorName}}</text>
+            </view>
+            <view class="preview-swatches">
+              <view wx:for="{{paletteSegments}}" wx:key="hex" class="preview-swatch" style="background: {{item.hex}}; flex-grow: {{item.weight}};"></view>
+            </view>
+            <view class="preview-copy">
+              <text class="preview-title">{{fields.title || '一场 Color Walk'}}</text>
+              <text class="preview-body">{{fields.body || '上传图片后生成拼贴文案。'}}</text>
+              <text class="preview-tags">{{fields.tags || '#ColorWalk'}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="canvas-zoom-toolbar">
+      <button class="zoom-button" bindtap="zoomOut">-</button>
+      <button class="zoom-level-button" bindtap="resetCanvasViewport">{{zoomPercent}}</button>
+      <button class="zoom-button" bindtap="zoomIn">+</button>
+      <button class="zoom-fit-button" bindtap="fitCanvasToViewport">自适应</button>
+    </view>
+
+    <view class="stage-actions">
+      <button class="upload-button" bindtap="choosePhotos">选择图片</button>
+      <text class="status-text">{{exportStatus}}</text>
+    </view>
+  </view>
+
+  <view class="control-panel">
+    <view class="panel-tabbar">
+      <button
+        wx:for="{{panelDefinitions}}"
+        wx:key="id"
+        class="panel-tab {{activePanel === item.id ? 'active' : ''}}"
+        data-panel="{{item.id}}"
+        bindtap="setActivePanel"
+      >{{item.label}}</button>
+    </view>
+
+    <scroll-view class="panel-content" scroll-y="true">
+      <view wx:if="{{activePanel === 'layout'}}" class="panel-page">
+        <view class="panel-title">
+          <text>拼贴结构</text>
+          <text>{{layoutDefinitions.length}} 模板</text>
+        </view>
+        <view class="layout-rail">
+          <button
+            wx:for="{{layoutDefinitions}}"
+            wx:key="id"
+            class="layout-option {{selectedLayout === item.id ? 'active' : ''}}"
+            data-layout="{{item.id}}"
+            bindtap="setLayout"
+          >{{item.label}}</button>
+        </view>
+      </view>
+
+      <view wx:if="{{activePanel === 'palette'}}" class="panel-page">
+        <view class="panel-title">
+          <text>整组色盘</text>
+          <text>{{averageColor}}</text>
+        </view>
+        <view class="palette-strip">
+          <button
+            wx:for="{{paletteColors}}"
+            wx:key="hex"
+            class="palette-swatch"
+            style="background: {{item.hex}}; color: {{item.textColor}};"
+            data-color="{{item.hex}}"
+            bindtap="setCustomColor"
+          >{{item.name}} {{item.hex}}</button>
+        </view>
+        <view class="photo-grid">
+          <view wx:if="{{!photos.length}}" class="empty-state">上传 1 到 9 张照片后，这里会显示主色调和 EXIF 信息。</view>
+          <view wx:for="{{photos}}" wx:key="id" class="photo-card">
+            <image src="{{item.src}}" mode="aspectFill" />
+            <view class="photo-card-meta">
+              <text>{{item.fileName}}</text>
+              <text>{{item.dominantColor.hex}}</text>
+            </view>
+            <view class="photo-card-actions">
+              <button size="mini" data-photo-id="{{item.id}}" data-delta="-0.1" bindtap="nudgePhotoScale">-</button>
+              <button size="mini" data-photo-id="{{item.id}}" data-delta="0.1" bindtap="nudgePhotoScale">+</button>
+              <button size="mini" data-photo-id="{{item.id}}" bindtap="resetPhotoTransform">重置</button>
+              <button size="mini" data-photo-id="{{item.id}}" bindtap="removePhoto">删除</button>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{activePanel === 'copy'}}" class="panel-page">
+        <view class="panel-title">
+          <text>封面文字</text>
+          <button class="text-button" bindtap="seedCopy">生成封面文字</button>
+        </view>
+        <view class="copy-actions">
+          <button class="text-button" bindtap="analyzePhotosWithAI">AI 识图</button>
+          <button class="text-button" bindtap="copyCurrentText">复制文字</button>
+        </view>
+        <label>地点<input id="placeInput" value="{{fields.place}}" data-field="place" bindinput="updateField" /></label>
+        <label>日期<input id="dateInput" type="date" value="{{fields.date}}" data-field="date" bindinput="updateField" /></label>
+        <label>时间<input id="timeInput" type="time" value="{{fields.time}}" data-field="time" bindinput="updateField" /></label>
+        <label>关键词<input id="keywordInput" value="{{fields.keyword}}" data-field="keyword" bindinput="updateField" /></label>
+        <label>范式
+          <picker range="{{copyStyleDefinitions}}" range-key="label" value="{{copyStyleIndex}}" bindchange="setCopyStyle">
+            <view class="picker-value">{{copyStyleLabel}}</view>
+          </picker>
+        </label>
+        <label>标题<input id="titleInput" value="{{fields.title}}" data-field="title" bindinput="updateField" /></label>
+        <label>正文<textarea id="bodyInput" value="{{fields.body}}" data-field="body" bindinput="updateField" auto-height="true"></textarea></label>
+        <label>标签<input id="tagsInput" value="{{fields.tags}}" data-field="tags" bindinput="updateField" /></label>
+      </view>
+
+      <view wx:if="{{activePanel === 'style'}}" class="panel-page">
+        <view class="panel-title">
+          <text>画布样式</text>
+          <text>{{ratioResolution}}</text>
+        </view>
+        <view class="ratio-preset-bar">
+          <button
+            wx:for="{{outputRatioPresets}}"
+            wx:key="id"
+            class="ratio-preset {{style.outputRatio === item.id ? 'active' : ''}}"
+            data-ratio="{{item.id}}"
+            bindtap="setOutputRatio"
+          >{{item.id}}</button>
+        </view>
+        <label>圆角 {{style.radius}}<slider min="0" max="32" value="{{style.radius}}" data-style="radius" bindchange="updateStyleNumber" /></label>
+        <label>留白 {{style.padding}}<slider min="0" max="28" value="{{style.padding}}" data-style="padding" bindchange="updateStyleNumber" /></label>
+        <label>色块比例 {{style.ratio}}<slider min="10" max="90" value="{{style.ratio}}" data-style="ratio" bindchange="updateStyleNumber" /></label>
+        <label>字号 {{style.fontSize}}<slider min="16" max="30" value="{{style.fontSize}}" data-style="fontSize" bindchange="updateStyleNumber" /></label>
+        <label class="switch-row">无边距模式<switch checked="{{style.borderless}}" bindchange="toggleBorderless" /></label>
+        <button class="text-button" bindtap="setEqualMovieRatio">图片与色块等高</button>
+        <button class="text-button" bindtap="toggleMovieColorPosition">切换色块位置</button>
+        <button class="text-button clear-draft-action" bindtap="clearSavedDraft">清除本地草稿</button>
+      </view>
+    </scroll-view>
+  </view>
+
+  <canvas id="sampleCanvas" canvas-id="sampleCanvas" type="2d" class="hidden-canvas"></canvas>
+  <canvas id="exportCanvas" canvas-id="exportCanvas" type="2d" class="hidden-canvas"></canvas>
+</view>
