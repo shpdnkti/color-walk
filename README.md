@@ -112,11 +112,11 @@ HEIC 上传回归检查默认使用仓库内无元数据的匿名样本；也可
 COLOR_WALK_HEIC_FIXTURE=/path/to/photo.heic npm run test:heic-upload
 ```
 
-Issue #5 的固定性能样本是 `test/fixtures/performance-4032x3024.heic`（4032×3024，SHA-256 `f62eb5df1493ee5454db0746384d29e6ddb33f01892a692eb01e1088993bc70a`）。在同一台机器、Playwright 1.61.1 / Chromium 149.0.7827.55 下各运行 5 次，冷启动“选择完成到首张可编辑预览”中位数从 `ae0e102` 的 1789.1ms 降至 1131.1ms，降低 36.8%；同页热上传中位数为 673.6ms → 691.3ms。候选冷启动原始数据为 `1272.8, 1114.9, 1123.3, 1131.1, 1204.9ms`。
+Issue #5 的固定性能样本是 `test/fixtures/performance-4032x3024.heic`（4032×3024，SHA-256 `f62eb5df1493ee5454db0746384d29e6ddb33f01892a692eb01e1088993bc70a`）。在同一台机器、Playwright 1.61.1 / Chromium 149.0.7827.55 下各运行 5 次，冷启动“选择完成到首张可编辑预览”中位数从 `ae0e102` 的 1789.1ms 降至 `eccfa10` 的 1087.4ms，降低 39.2%；同页热上传中位数为 673.6ms → 727.5ms。候选冷启动原始数据为 `1145.3, 1152.0, 1063.8, 1077.0, 1087.4ms`。
 
 每次冷启动使用新的 Chromium 进程和 BrowserContext 并清理缓存；热上传在同页重置编辑器后复测。基准以文件输入框的 `change` 为起点，以预览已解码、照片卡片和裁切滑杆可操作并经过两个 `requestAnimationFrame` 为终点。提供基线 JSON 时，冷启动中位数改善不足 30% 会直接失败；任一冷/热运行的帧间隔或 Long Task 超过 150ms 也会失败：
 
-最终 5 次报告的冷/热最大帧间隔为 50.1/50.0ms，最大 Long Task 为 60/61ms；额外 10 次压力复测也全部低于 150ms。将上传意图预热时间改为 0ms 的敏感性控制中，冷启动中位数为 1602.8ms（改善 10.4%）；该控制不作为约定的“选择完成后等待”验收口径。
+最终 5 次报告的冷/热最大帧间隔为 66.7/50.0ms，最大 Long Task 为 53/0ms，全部低于 150ms 门槛。
 
 ```bash
 COLOR_WALK_HEIC_RUNS=5 COLOR_WALK_HEIC_OUTPUT=/tmp/heic-candidate.json \

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-10T18:18:20.430Z",
-  "gitCommit": "757a303a54c5e4f0a34e67b79817ccf99fd2b9d4",
+  "generatedAt": "2026-07-10T18:34:41.969Z",
+  "gitCommit": "eccfa10eedc18499d08e1f63c1dff9136e388ed9",
   "appRoot": "/data/color-walk",
   "fixture": {
     "path": "/data/color-walk/test/fixtures/performance-4032x3024.heic",
@@ -35,76 +35,56 @@
     "maxLongTaskMs": 150
   },
   "cold": {
-    "medianFirstEditableMs": 1131.1,
-    "medianMaxAnimationFrameGapMs": 50,
-    "maxAnimationFrameGapMs": 50.1,
-    "maxLongTaskMs": 60,
+    "medianFirstEditableMs": 1087.4,
+    "medianMaxAnimationFrameGapMs": 16.8,
+    "maxAnimationFrameGapMs": 66.7,
+    "maxLongTaskMs": 53,
     "runs": [
       {
-        "firstEditableMs": 1272.8,
+        "firstEditableMs": 1145.3,
+        "maxAnimationFrameGapMs": 66.7,
+        "longTasks": [
+          {
+            "startMs": 1079,
+            "durationMs": 53
+          }
+        ],
+        "naturalWidth": 4032,
+        "naturalHeight": 3024,
+        "resources": [],
+        "decoderRequests": 1
+      },
+      {
+        "firstEditableMs": 1152,
         "maxAnimationFrameGapMs": 50,
-        "longTasks": [
-          {
-            "startMs": 1201.9,
-            "durationMs": 58
-          }
-        ],
+        "longTasks": [],
         "naturalWidth": 4032,
         "naturalHeight": 3024,
         "resources": [],
         "decoderRequests": 1
       },
       {
-        "firstEditableMs": 1114.9,
-        "maxAnimationFrameGapMs": 49.9,
-        "longTasks": [
-          {
-            "startMs": 1037.5,
-            "durationMs": 60
-          }
-        ],
+        "firstEditableMs": 1063.8,
+        "maxAnimationFrameGapMs": 16.8,
+        "longTasks": [],
         "naturalWidth": 4032,
         "naturalHeight": 3024,
         "resources": [],
         "decoderRequests": 1
       },
       {
-        "firstEditableMs": 1123.3,
-        "maxAnimationFrameGapMs": 50,
-        "longTasks": [
-          {
-            "startMs": 1053.2,
-            "durationMs": 60
-          }
-        ],
+        "firstEditableMs": 1077,
+        "maxAnimationFrameGapMs": 16.8,
+        "longTasks": [],
         "naturalWidth": 4032,
         "naturalHeight": 3024,
         "resources": [],
         "decoderRequests": 1
       },
       {
-        "firstEditableMs": 1131.1,
-        "maxAnimationFrameGapMs": 50.1,
-        "longTasks": [
-          {
-            "startMs": 1052.1,
-            "durationMs": 58
-          }
-        ],
-        "naturalWidth": 4032,
-        "naturalHeight": 3024,
-        "resources": [],
-        "decoderRequests": 1
-      },
-      {
-        "firstEditableMs": 1204.9,
-        "maxAnimationFrameGapMs": 50,
-        "longTasks": [
-          {
-            "startMs": 1133.5,
-            "durationMs": 58
-          }
-        ],
+        "firstEditableMs": 1087.4,
+        "maxAnimationFrameGapMs": 16.8,
+        "longTasks": [],
         "naturalWidth": 4032,
         "naturalHeight": 3024,
         "resources": [],
@@ -113,14 +93,14 @@
     ]
   },
   "warm": {
-    "medianFirstEditableMs": 691.3,
-    "medianMaxAnimationFrameGapMs": 33.4,
+    "medianFirstEditableMs": 727.5,
+    "medianMaxAnimationFrameGapMs": 50,
     "maxAnimationFrameGapMs": 50,
-    "maxLongTaskMs": 61,
+    "maxLongTaskMs": 0,
     "runs": [
       {
-        "firstEditableMs": 851.1,
-        "maxAnimationFrameGapMs": 33.3,
+        "firstEditableMs": 880.8,
+        "maxAnimationFrameGapMs": 50,
         "longTasks": [],
         "naturalWidth": 4032,
         "naturalHeight": 3024,
@@ -128,22 +108,26 @@
         "decoderRequests": 0
       },
       {
-        "firstEditableMs": 691.3,
+        "firstEditableMs": 759,
+        "maxAnimationFrameGapMs": 50,
+        "longTasks": [],
+        "naturalWidth": 4032,
+        "naturalHeight": 3024,
+        "resources": [],
+        "decoderRequests": 0
+      },
+      {
+        "firstEditableMs": 727.5,
+        "maxAnimationFrameGapMs": 50,
+        "longTasks": [],
+        "naturalWidth": 4032,
+        "naturalHeight": 3024,
+        "resources": [],
+        "decoderRequests": 0
+      },
+      {
+        "firstEditableMs": 673.8,
         "maxAnimationFrameGapMs": 33.4,
-        "longTasks": [
-          {
-            "startMs": 634.5,
-            "durationMs": 50
-          }
-        ],
-        "naturalWidth": 4032,
-        "naturalHeight": 3024,
-        "resources": [],
-        "decoderRequests": 0
-      },
-      {
-        "firstEditableMs": 703.4,
-        "maxAnimationFrameGapMs": 33.3,
         "longTasks": [],
         "naturalWidth": 4032,
         "naturalHeight": 3024,
@@ -151,23 +135,9 @@
         "decoderRequests": 0
       },
       {
-        "firstEditableMs": 620.9,
-        "maxAnimationFrameGapMs": 50,
+        "firstEditableMs": 612.1,
+        "maxAnimationFrameGapMs": 33.2,
         "longTasks": [],
-        "naturalWidth": 4032,
-        "naturalHeight": 3024,
-        "resources": [],
-        "decoderRequests": 0
-      },
-      {
-        "firstEditableMs": 682.5,
-        "maxAnimationFrameGapMs": 50,
-        "longTasks": [
-          {
-            "startMs": 586.1,
-            "durationMs": 61
-          }
-        ],
         "naturalWidth": 4032,
         "naturalHeight": 3024,
         "resources": [],
@@ -177,8 +147,8 @@
   },
   "comparison": {
     "baselineColdMedianMs": 1789.1,
-    "candidateColdMedianMs": 1131.1,
-    "reduction": 0.3678,
+    "candidateColdMedianMs": 1087.4,
+    "reduction": 0.3922,
     "requiredReduction": 0.3
   }
 }
