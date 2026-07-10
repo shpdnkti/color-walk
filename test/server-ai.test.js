@@ -4,6 +4,18 @@ import assert from 'node:assert/strict';
 
 import { createColorWalkServer } from '../server.js';
 
+test('serves the pinned HEIC browser decoder module', async (t) => {
+  const app = createColorWalkServer();
+  const appPort = await listenOnLocalhost(app);
+  t.after(async function () { await closeServer(app); });
+
+  const response = await fetch('http://127.0.0.1:' + appPort + '/vendor/heic-to/heic-to.js', { method: 'HEAD' });
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') || '', /text\/javascript/);
+  assert.ok(Number(response.headers.get('content-length')) > 1_000_000);
+});
+
 test('analyze-image proxies photos to configured Responses API and returns parsed insight', async (t) => {
   const upstreamRequests = [];
   const upstream = http.createServer(async function (request, response) {

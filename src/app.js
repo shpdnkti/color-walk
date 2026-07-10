@@ -12,7 +12,10 @@ import {
 const DRAFT_STORAGE_KEY = 'color-walk-draft';
 const GEOCODE_CACHE_KEY = 'color-walk-geocode-cache';
 const DIRECT_NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
+const HEIC_DECODER_MODULE_URL = '/vendor/heic-to/heic-to.js?v=1.5.2';
 let draftSaveTimer = 0;
+let heicDecoderLoadAttempt = 0;
+let heicDecoderModulePromise = null;
 
 const outputRatioConfig = {
   ratioPresets: [
@@ -221,21 +224,29 @@ async function handleFiles(event) {
   if (!files.length) return;
   els.exportStatus.textContent = '正在识别图片主色和照片信息...';
 
-  const loaded = await Promise.all(files.map(createPhotoItem));
-  state.photos.push(...loaded.filter(Boolean));
-  await hydrateLocationLabels(loaded.filter(Boolean));
-  state.customColor = getMainColorHex() || state.customColor;
-  state.copyDirty = false;
-  seedCoverText();
-  renderAll();
-  els.exportStatus.textContent = '已完成识别，可以继续调整文本和结构。';
-  requestAnimationFrame(function () { fitCanvasToViewport(true); });
-  event.target.value = '';
+  try {
+    const loaded = await Promise.all(files.map(createPhotoItem));
+    state.photos.push(...loaded.filter(Boolean));
+    await hydrateLocationLabels(loaded.filter(Boolean));
+    state.customColor = getMainColorHex() || state.customColor;
+    state.copyDirty = false;
+    seedCoverText();
+    renderAll();
+    els.exportStatus.textContent = '已完成识别，可以继续调整文本和结构。';
+    requestAnimationFrame(function () { fitCanvasToViewport(true); });
+  } catch (error) {
+    els.exportStatus.textContent = files.some(isHeicFile)
+      ? 'HEIC/HEIF 图片读取失败，请重试或转换为 JPG/PNG。'
+      : '图片读取失败，请检查文件格式后再试。';
+  } finally {
+    event.target.value = '';
+  }
 }
 
 async function createPhotoItem(file) {
-  const dataUrl = await fileToDataUrl(file);
-  const image = await loadImage(dataUrl);
+  const loadedImage = await loadPhotoImage(file);
+  const dataUrl = loadedImage.dataUrl;
+  const image = loadedImage.image;
   const dominant = extractDominantColor(image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
   const metadata = await extractPhotoMetadata(file);
 
@@ -2032,6 +2043,42 @@ function fileToDataUrl(file) {
   });
 }
 
+
+function loadHeicDecoderModule() {
+  if (heicDecoderModulePromise) return heicDecoderModulePromise;
+
+  const retryQuery = heicDecoderLoadAttempt ? '&retry=' + heicDecoderLoadAttempt : '';
+  heicDecoderModulePromise = import(HEIC_DECODER_MODULE_URL + retryQuery).catch(function (error) {
+    heicDecoderModulePromise = null;
+    heicDecoderLoadAttempt += 1;
+    throw error;
+  });
+  return heicDecoderModulePromise;
+}
+
+async function loadPhotoImage(file) {
+  const originalDataUrl = await fileToDataUrl(file);
+  try {
+    return { dataUrl: originalDataUrl, image: await loadImage(originalDataUrl) };
+  } catch (error) {
+    if (!isHeicFile(file)) throw error;
+  }
+
+  const module = await loadHeicDecoderModule();
+  const converted = await module.heicTo({
+    blob: file,
+    type: 'image/jpeg',
+    quality: 0.9,
+  });
+  const dataUrl = await fileToDataUrl(converted);
+  return { dataUrl, image: await loadImage(dataUrl) };
+}
+
+function isHeicFile(file) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || '').toLowerCase();
+  return type === 'image/heic' || type === 'image/heif' || /\.(heic|heif)$/.test(name);
+}
 
 function loadImage(src) {
   return new Promise(function (resolve, reject) {

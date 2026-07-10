@@ -1,0 +1,160 @@
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { chromium } from 'playwright';
+
+import { createColorWalkServer } from '../server.js';
+
+const fixturePath = resolve(process.env.COLOR_WALK_HEIC_FIXTURE || 'test/fixtures/upload.heic');
+const fixtureMimeType = process.env.COLOR_WALK_HEIC_MIME_TYPE ?? 'image/heic';
+const usesDefaultFixture = !process.env.COLOR_WALK_HEIC_FIXTURE;
+const failFirstDecoderRequest = process.env.COLOR_WALK_HEIC_FAIL_FIRST_DECODER === '1';
+const fixtureLastModified = Date.UTC(2024, 0, 2, 12);
+
+if (!existsSync(fixturePath)) {
+  console.error('HEIC fixture not found: ' + fixturePath);
+  console.error('Set COLOR_WALK_HEIC_FIXTURE to a real .heic file.');
+  process.exit(1);
+}
+
+const app = createColorWalkServer();
+const port = await listenOnLocalhost(app);
+let browser;
+
+try {
+  browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1024, height: 900 }, deviceScaleFactor: 1 });
+  const pageErrors = [];
+  let reportPageError;
+  const firstPageError = new Promise(function (resolveError) {
+    reportPageError = resolveError;
+  });
+
+  page.on('pageerror', function (error) {
+    const message = String(error?.message || error);
+    pageErrors.push(message);
+    reportPageError({ kind: 'pageerror', message });
+  });
+  let decoderRequests = 0;
+  await page.route('**/vendor/heic-to/heic-to.js*', function (route) {
+    decoderRequests += 1;
+    if (failFirstDecoderRequest && decoderRequests === 1) return route.abort('failed');
+    return route.continue();
+  });
+  await page.route('**/api/reverse-geocode**', function (route) {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ label: '测试地点' }),
+    });
+  });
+
+  await page.goto('http://127.0.0.1:' + port + '/', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(function () { localStorage.clear(); });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+
+  const completed = page.waitForFunction(function () {
+    const image = document.querySelector('.preview-image.has-photo img');
+    return document.querySelector('#exportStatus')?.textContent === '已完成识别，可以继续调整文本和结构。'
+      && document.querySelectorAll('.photo-card').length === 1
+      && image?.naturalWidth > 0
+      && image?.naturalHeight > 0;
+  }, null, { timeout: 15_000 }).then(
+    function () { return { kind: 'completed' }; },
+    function (error) { return { kind: 'timeout', message: error.message }; }
+  );
+
+  const fixtureBuffer = readFileSync(fixturePath);
+  if (failFirstDecoderRequest) {
+    const firstAttemptFile = await uploadFixture(page, fixtureBuffer, fixtureMimeType, fixtureLastModified);
+    assert.equal(firstAttemptFile.type, fixtureMimeType);
+    await page.waitForFunction(function () {
+      return document.querySelector('#exportStatus')?.textContent === 'HEIC/HEIF 图片读取失败，请重试或转换为 JPG/PNG。';
+    }, null, { timeout: 5_000 });
+    assert.equal(await page.locator('.photo-card').count(), 0);
+  }
+
+  const injectedFile = await uploadFixture(page, fixtureBuffer, fixtureMimeType, fixtureLastModified);
+  assert.equal(injectedFile.type, fixtureMimeType);
+
+  const outcome = await Promise.race([completed, firstPageError]);
+  const probe = await page.evaluate(function () {
+    const image = document.querySelector('.preview-image.has-photo img');
+    return {
+      status: document.querySelector('#exportStatus')?.textContent || '',
+      photoCards: document.querySelectorAll('.photo-card').length,
+      previewImages: document.querySelectorAll('.preview-image.has-photo img').length,
+      naturalWidth: image?.naturalWidth || 0,
+      naturalHeight: image?.naturalHeight || 0,
+      sourcePrefix: String(image?.src || '').slice(0, 32),
+      coverText: document.querySelector('#coverTextInput')?.value || '',
+    };
+  });
+
+  assert.equal(outcome.kind, 'completed', JSON.stringify({ outcome, probe, pageErrors }, null, 2));
+  assert.equal(probe.photoCards, 1);
+  assert.equal(probe.previewImages, 1);
+  assert.deepEqual(pageErrors, []);
+  assert.equal(decoderRequests, failFirstDecoderRequest ? 2 : 1);
+  assert.match(probe.sourcePrefix, /^data:image\/jpeg;base64,/);
+  assert.ok(probe.naturalWidth > 0);
+  assert.ok(probe.naturalHeight > 0);
+  if (usesDefaultFixture) {
+    assert.equal(probe.naturalWidth, 96);
+    assert.equal(probe.naturalHeight, 72);
+    assert.match(probe.coverText, /2024\.01\.02/);
+  }
+
+  console.log('PASS HEIC upload regression: the selected image is decoded and rendered.');
+} finally {
+  if (browser) await browser.close();
+  await closeServer(app);
+}
+
+async function uploadFixture(page, buffer, mimeType, lastModified) {
+  await page.evaluate(function () {
+    document.querySelector('#heicFixtureInput')?.remove();
+    const stagingInput = document.createElement('input');
+    stagingInput.id = 'heicFixtureInput';
+    stagingInput.type = 'file';
+    document.body.append(stagingInput);
+  });
+  await page.setInputFiles('#heicFixtureInput', {
+    name: 'upload.heic',
+    mimeType: 'application/octet-stream',
+    buffer,
+  });
+  return page.evaluate(function (options) {
+    const stagingInput = document.querySelector('#heicFixtureInput');
+    const sourceFile = stagingInput.files[0];
+    const file = new File([sourceFile], 'upload.heic', options);
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    const targetInput = document.querySelector('#fileInput');
+    targetInput.files = transfer.files;
+    stagingInput.remove();
+    targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+    return { name: file.name, type: file.type, size: file.size };
+  }, { type: mimeType, lastModified });
+}
+
+function listenOnLocalhost(server) {
+  return new Promise(function (resolvePort, reject) {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', function () {
+      server.removeListener('error', reject);
+      resolvePort(server.address().port);
+    });
+  });
+}
+
+function closeServer(server) {
+  if (!server.listening) return Promise.resolve();
+  return new Promise(function (resolveClose, reject) {
+    server.close(function (error) {
+      if (error) reject(error);
+      else resolveClose();
+    });
+  });
+}
