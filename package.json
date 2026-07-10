@@ -8,10 +8,14 @@
     "test": "node --test",
     "test:export-preview": "node scripts/export-preview-smoke.mjs",
     "test:image-crop-drag": "COLOR_WALK_RUN_IMAGE_CROP_DRAG=1 node scripts/image-crop-drag-regression.mjs",
+    "bench:heic-first-preview": "node scripts/heic-first-preview-benchmark.mjs",
     "miniprogram:validate": "node scripts/validate-miniprogram.mjs",
     "miniprogram:preview": "node scripts/upload-miniprogram.mjs preview",
     "miniprogram:upload": "node scripts/upload-miniprogram.mjs upload",
-    "test:heic-upload": "node scripts/heic-upload-regression.mjs"
+    "test:heic-upload": "node scripts/heic-upload-regression.mjs",
+    "test:heic-worker": "COLOR_WALK_RUN_HEIC_BROWSER=1 node --test test/server-ai.test.js",
+    "test:upload-enrichment": "node scripts/upload-progressive-regression.mjs",
+    "test:heic-progressive": "node scripts/progressive-upload-regression.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1"

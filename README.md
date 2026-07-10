@@ -111,3 +111,21 @@ HEIC 上传回归检查默认使用仓库内无元数据的匿名样本；也可
 ```bash
 COLOR_WALK_HEIC_FIXTURE=/path/to/photo.heic npm run test:heic-upload
 ```
+
+Issue #5 的固定性能样本是 `test/fixtures/performance-4032x3024.heic`（4032×3024，SHA-256 `f62eb5df1493ee5454db0746384d29e6ddb33f01892a692eb01e1088993bc70a`）。在同一台机器、Playwright 1.61.1 / Chromium 149.0.7827.55 下各运行 5 次，冷启动“选择完成到首张可编辑预览”中位数从 `ae0e102` 的 1789.1ms 降至 1123.6ms，降低 37.2%；同页热上传中位数为 673.6ms → 698.0ms。原始冷启动数据分别为 `1874.7, 1789.1, 1781.4, 1803.6, 1789.0ms` 和 `1276.7, 1082.5, 1123.6, 1145.8, 1113.8ms`。
+
+每次冷启动使用新的 Chromium 进程和 BrowserContext 并清理缓存；热上传在同页重置编辑器后复测。基准以文件输入框的 `change` 为起点，以预览已解码、照片卡片和裁切滑杆可操作并经过两个 `requestAnimationFrame` 为终点。提供基线 JSON 时，冷启动中位数改善不足 30% 会直接失败；任一冷/热运行的帧间隔或 Long Task 超过 150ms 也会失败：
+
+```bash
+COLOR_WALK_HEIC_RUNS=5 COLOR_WALK_HEIC_OUTPUT=/tmp/heic-candidate.json \
+  COLOR_WALK_HEIC_BASELINE=/tmp/heic-baseline.json npm run bench:heic-first-preview
+
+npm run test:upload-enrichment
+npm run test:heic-progressive
+```
+
+Worker 预热、串行解码和加载失败属于可选浏览器测试，不随默认 npm test 启动 Chromium：
+
+    npm run test:heic-worker
+
+完整口径、环境和优化前后原始数据见 [HEIC 首张可编辑预览性能基准](docs/performance/heic-first-preview.md)。

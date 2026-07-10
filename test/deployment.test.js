@@ -71,7 +71,7 @@ test('preview compose serves the live source tree from a separate yaml', async (
   assert.match(compose, /- "\$\{PREVIEW_PORT:-5173\}:80"/);
   assert.match(compose, /- \.\/index\.html:\/usr\/share\/nginx\/html\/index\.html:ro/);
   assert.match(compose, /- \.\/src:\/usr\/share\/nginx\/html\/src:ro/);
-  assert.match(compose, /node_modules\/heic-to\/dist\/csp:\/usr\/share\/nginx\/html\/vendor\/heic-to:ro/);
+  assert.match(compose, /node_modules\/heic-to\/dist\/next:\/usr\/share\/nginx\/html\/vendor\/heic-to:ro/);
   assert.match(compose, /- \.\/nginx\.conf:\/etc\/nginx\/conf\.d\/default\.conf:ro/);
   assert.match(compose, /- \.\/nginx\.preview\.conf:\/etc\/nginx\/nginx\.conf:ro/);
 });
@@ -99,7 +99,15 @@ test('documents opt-in browser regression checks', async () => {
 
   assert.equal(packageJson.scripts['test:export-preview'], 'node scripts/export-preview-smoke.mjs');
   assert.equal(packageJson.scripts['test:heic-upload'], 'node scripts/heic-upload-regression.mjs');
+  assert.equal(packageJson.scripts['test:heic-worker'], 'COLOR_WALK_RUN_HEIC_BROWSER=1 node --test test/server-ai.test.js');
+  assert.equal(packageJson.scripts['test:upload-enrichment'], 'node scripts/upload-progressive-regression.mjs');
+  assert.equal(packageJson.scripts['test:heic-progressive'], 'node scripts/progressive-upload-regression.mjs');
+  assert.equal(packageJson.scripts['bench:heic-first-preview'], 'node scripts/heic-first-preview-benchmark.mjs');
   assert.match(readme, /npm run test:export-preview/);
   assert.match(readme, /COLOR_WALK_RUN_EXPORT_PREVIEW_SMOKE=1/);
   assert.match(readme, /COLOR_WALK_HEIC_FIXTURE/);
+  assert.match(readme, /npm run test:upload-enrichment/);
+  assert.match(readme, /npm run test:heic-progressive/);
+  assert.match(readme, /npm run test:heic-worker/);
+  assert.match(readme, /npm run bench:heic-first-preview/);
 });

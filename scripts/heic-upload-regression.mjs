@@ -70,7 +70,7 @@ try {
     const firstAttemptFile = await uploadFixture(page, fixtureBuffer, fixtureMimeType, fixtureLastModified);
     assert.equal(firstAttemptFile.type, fixtureMimeType);
     await page.waitForFunction(function () {
-      return document.querySelector('#exportStatus')?.textContent === 'HEIC/HEIF 图片读取失败，请重试或转换为 JPG/PNG。';
+      return document.querySelector('#exportStatus')?.textContent === '1 张图片读取失败，请重试或转换为 JPG/PNG。';
     }, null, { timeout: 5_000 });
     assert.equal(await page.locator('.photo-card').count(), 0);
   }
@@ -79,8 +79,14 @@ try {
   assert.equal(injectedFile.type, fixtureMimeType);
 
   const outcome = await Promise.race([completed, firstPageError]);
-  const probe = await page.evaluate(function () {
+  if (usesDefaultFixture) {
+    await page.waitForFunction(function () {
+      return document.querySelector('#coverTextInput')?.value.includes('2024.01.02');
+    }, null, { timeout: 5_000 });
+  }
+  const probe = await page.evaluate(async function () {
     const image = document.querySelector('.preview-image.has-photo img');
+    const sourceResponse = image?.src ? await fetch(image.src) : null;
     return {
       status: document.querySelector('#exportStatus')?.textContent || '',
       photoCards: document.querySelectorAll('.photo-card').length,
@@ -88,6 +94,7 @@ try {
       naturalWidth: image?.naturalWidth || 0,
       naturalHeight: image?.naturalHeight || 0,
       sourcePrefix: String(image?.src || '').slice(0, 32),
+      sourceMimeType: sourceResponse?.headers.get('content-type') || '',
       coverText: document.querySelector('#coverTextInput')?.value || '',
     };
   });
@@ -97,7 +104,8 @@ try {
   assert.equal(probe.previewImages, 1);
   assert.deepEqual(pageErrors, []);
   assert.equal(decoderRequests, failFirstDecoderRequest ? 2 : 1);
-  assert.match(probe.sourcePrefix, /^data:image\/jpeg;base64,/);
+  assert.match(probe.sourcePrefix, /^(blob:|data:image\/jpeg;base64,)/);
+  assert.equal(probe.sourceMimeType, 'image/jpeg');
   assert.ok(probe.naturalWidth > 0);
   assert.ok(probe.naturalHeight > 0);
   if (usesDefaultFixture) {
