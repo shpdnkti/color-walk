@@ -11,6 +11,7 @@ test('Dockerfile serves the app server and includes static and API assets', asyn
 
   assert.match(dockerfile, /^FROM node:22-alpine$/m);
   assert.match(dockerfile, /^COPY package\.json package-lock\.json \.\/$/m);
+  assert.match(dockerfile, /^RUN npm ci --omit=dev$/m);
   assert.match(dockerfile, /^COPY index\.html \.\/index\.html$/m);
   assert.match(dockerfile, /^COPY src\/ \.\/src\//m);
   assert.match(dockerfile, /^COPY server\/ \.\/server\//m);
@@ -70,6 +71,7 @@ test('preview compose serves the live source tree from a separate yaml', async (
   assert.match(compose, /- "\$\{PREVIEW_PORT:-5173\}:80"/);
   assert.match(compose, /- \.\/index\.html:\/usr\/share\/nginx\/html\/index\.html:ro/);
   assert.match(compose, /- \.\/src:\/usr\/share\/nginx\/html\/src:ro/);
+  assert.match(compose, /node_modules\/heic-to\/dist\/csp:\/usr\/share\/nginx\/html\/vendor\/heic-to:ro/);
   assert.match(compose, /- \.\/nginx\.conf:\/etc\/nginx\/conf\.d\/default\.conf:ro/);
   assert.match(compose, /- \.\/nginx\.preview\.conf:\/etc\/nginx\/nginx\.conf:ro/);
 });
@@ -91,11 +93,13 @@ test('nginx configuration supports browser module assets and single-page fallbac
   assert.match(nginx, /add_header Cache-Control "public, max-age=604800, immutable";/);
 });
 
-test('documents an opt-in export and preview consistency smoke check', async () => {
+test('documents opt-in browser regression checks', async () => {
   const packageJson = JSON.parse(await readProjectFile('package.json'));
   const readme = await readProjectFile('README.md');
 
   assert.equal(packageJson.scripts['test:export-preview'], 'node scripts/export-preview-smoke.mjs');
+  assert.equal(packageJson.scripts['test:heic-upload'], 'node scripts/heic-upload-regression.mjs');
   assert.match(readme, /npm run test:export-preview/);
   assert.match(readme, /COLOR_WALK_RUN_EXPORT_PREVIEW_SMOKE=1/);
+  assert.match(readme, /COLOR_WALK_HEIC_FIXTURE/);
 });

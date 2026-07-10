@@ -7,6 +7,7 @@
 OpenAI 识图会读取环境变量 `OPENAI_API_KEY`，也会自动加载项目根目录的 `.env.local` 或 `.env`。可用 `OPENAI_BASE_URL` 指向 OpenAI 兼容代理或自建网关，用 `OPENAI_VISION_MODEL` 调整模型，用 `OPENAI_REQUEST_TIMEOUT_MS` 调整请求超时。没有密钥时，编辑器的手动文案、拼贴、导出和 GPS 坐标读取仍然可用，只有 `AI识图` 会提示失败。
 
 ```bash
+npm ci
 npm start
 ```
 
@@ -45,6 +46,7 @@ docker compose down
 预览模式使用独立的 `docker-compose.preview.yml`，不构建镜像，而是把当前源码只读挂载进 Nginx 容器。它会挂载 `nginx.preview.conf` 作为预览专用主配置，避免本地文件权限较严格时出现 Nginx 403。修改文件后刷新浏览器即可看到变化。预览模式不包含 `/api/analyze-image`，完整 AI 功能请用 `npm start` 或生产服务。
 
 ```bash
+npm ci
 docker compose -f docker-compose.preview.yml up
 ```
 
@@ -102,4 +104,10 @@ docker compose -f docker-compose.preview.yml config
 
 ```bash
 COLOR_WALK_RUN_EXPORT_PREVIEW_SMOKE=1 npm run test:export-preview
+```
+
+HEIC 上传回归检查默认使用仓库内无元数据的匿名样本；也可以指定本地原图复测，原图只在浏览器内读取，不会提交到仓库：
+
+```bash
+COLOR_WALK_HEIC_FIXTURE=/path/to/photo.heic npm run test:heic-upload
 ```

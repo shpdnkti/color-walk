@@ -7,6 +7,7 @@ import { normalizeCoordinate, formatReverseGeocodeLabel } from './src/geocode.js
 import { buildVisionRequest, parseVisionResponse } from './server/vision.js';
 
 const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url));
+const HEIC_TO_BROWSER_MODULE_PATH = join(ROOT_DIR, 'node_modules', 'heic-to', 'dist', 'csp', 'heic-to.js');
 const PORT = Number(process.env.PORT || 3000);
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -184,6 +185,10 @@ function resolveStaticPath(pathname) {
   let relativePath = decoded === '/' ? '/index.html' : decoded;
   if (relativePath.includes('\0') || relativePath.split('/').some(function (part) { return part.startsWith('.'); })) {
     return '';
+  }
+
+  if (relativePath === '/vendor/heic-to/heic-to.js') {
+    return existsSync(HEIC_TO_BROWSER_MODULE_PATH) ? HEIC_TO_BROWSER_MODULE_PATH : '';
   }
 
   const allowed = relativePath === '/index.html' || relativePath.startsWith('/src/');

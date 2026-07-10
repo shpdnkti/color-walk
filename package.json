@@ -10,9 +10,13 @@
     "test:image-crop-drag": "COLOR_WALK_RUN_IMAGE_CROP_DRAG=1 node scripts/image-crop-drag-regression.mjs",
     "miniprogram:validate": "node scripts/validate-miniprogram.mjs",
     "miniprogram:preview": "node scripts/upload-miniprogram.mjs preview",
-    "miniprogram:upload": "node scripts/upload-miniprogram.mjs upload"
+    "miniprogram:upload": "node scripts/upload-miniprogram.mjs upload",
+    "test:heic-upload": "node scripts/heic-upload-regression.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1"
+  },
+  "dependencies": {
+    "heic-to": "1.5.2"
   }
 }
