@@ -88,6 +88,7 @@ test('HEIC decoder worker warms before readiness and isolates serial decode fail
           return;
         }
 
+        if (message.type === 'dominant-color') return;
         results.push(message);
         if (results.length !== 3) return;
         clearTimeout(timeout);

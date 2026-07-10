@@ -130,6 +130,15 @@ try {
     ['slow-one.heic', 'slow-two.heif', 'fast.png'],
     'progressive completion must preserve the original file selection order'
   );
+  await page.waitForFunction(function () {
+    return ['slow-one.heic', 'slow-two.heif'].every(function (fileName) {
+      const image = Array.from(document.querySelectorAll('.photo-card img')).find(function (item) {
+        return item.alt === fileName;
+      });
+      const color = image?.closest('.photo-card')?.querySelector('.color-chip span:last-child')?.textContent?.trim();
+      return color && color !== '#A0A0A0';
+    });
+  }, null, { timeout: decodeTimeoutMs });
   const colorProbe = await page.evaluate(function () {
     const colors = Array.from(document.querySelectorAll('.color-chip span:last-child'), function (node) {
       return node.textContent.trim();

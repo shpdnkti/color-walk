@@ -16,6 +16,7 @@ const DIRECT_NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
 const HEIC_DECODER_WORKER_URL = '/src/heic-decoder-worker.js?v=20260710-heic-first-preview';
 const HEIC_WORKER_LOAD_TIMEOUT_MS = 15_000;
 const HEIC_DECODE_TIMEOUT_MS = 60_000;
+const HEIC_COLOR_TIMEOUT_MS = 15_000;
 const UPLOAD_CONCURRENCY = 2;
 let draftSaveTimer = 0;
 let heicDecoderLoadAttempt = 0;
@@ -27,6 +28,7 @@ let heicDecoderWorkerLoadTimeout = 0;
 let nextHeicDecodeId = 0;
 let heicDecodeRequestQueue = Promise.resolve();
 const heicDecoderPending = new Map();
+const heicDominantColorPending = new Map();
 
 const outputRatioConfig = {
   ratioPresets: [
@@ -317,9 +319,11 @@ async function createPhotoItem(file) {
   const loadedImage = await loadPhotoImage(file);
   const dataUrl = loadedImage.dataUrl;
   const image = loadedImage.image;
-  const dominant = extractDominantColor(image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
-
-  return {
+  const fallbackColor = { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
+  const dominant = loadedImage.dominantColor
+    || (loadedImage.dominantColorPromise ? null : extractDominantColor(image))
+    || fallbackColor;
+  const photo = {
     id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
     fileName: file.name,
     src: loadedImage.src || dataUrl,
@@ -332,6 +336,24 @@ async function createPhotoItem(file) {
     naturalHeight: image.naturalHeight,
     ratio: image.naturalWidth / image.naturalHeight,
   };
+
+  if (loadedImage.dominantColorPromise) {
+    hydratePhotoDominantColor(photo, loadedImage.dominantColorPromise);
+  }
+  return photo;
+}
+
+function hydratePhotoDominantColor(photo, dominantColorPromise) {
+  dominantColorPromise.then(function (dominantColor) {
+    if (!dominantColor?.hex) return;
+    photo.dominantColor = dominantColor;
+    photo.textColor = getReadableTextColor(dominantColor.hex);
+    if (!state.photos.some(function (item) { return item.id === photo.id; })) return;
+    state.customColor = getMainColorHex() || state.customColor;
+    if (!state.copyDirty) seedCoverText();
+    renderAll();
+    scheduleDraftSave();
+  }).catch(function () {});
 }
 
 function insertPhotoByUploadOrder(photo, uploadOrder) {
@@ -2177,7 +2199,7 @@ function fileToDataUrl(file) {
 
 
 function releaseIdleHeicDecoderWorker() {
-  if (!heicDecoderPending.size && heicDecoderWorkerReadyPromise) {
+  if (!heicDecoderPending.size && !heicDominantColorPending.size && heicDecoderWorkerReadyPromise) {
     resetHeicDecoderWorker(new Error('HEIC decoder is not needed for this upload'));
   }
 }
@@ -2240,17 +2262,32 @@ function handleHeicDecoderWorkerMessage(event) {
     return;
   }
 
+  if (message.type === 'dominant-color') {
+    const pendingColor = heicDominantColorPending.get(message.id);
+    if (!pendingColor) return;
+    clearTimeout(pendingColor.timeout);
+    heicDominantColorPending.delete(message.id);
+    pendingColor.resolve(message.dominantColor || null);
+    return;
+  }
+
   const pending = heicDecoderPending.get(message.id);
   if (!pending) return;
   if (message.type === 'decoded') {
     clearTimeout(pending.timeout);
     heicDecoderPending.delete(message.id);
-    pending.resolve(message.blob);
+    const colorTimeout = setTimeout(function () {
+      heicDominantColorPending.delete(message.id);
+      pending.resolveDominantColor(null);
+    }, HEIC_COLOR_TIMEOUT_MS);
+    heicDominantColorPending.set(message.id, { resolve: pending.resolveDominantColor, timeout: colorTimeout });
+    pending.resolve({ blob: message.blob, dominantColorPromise: pending.dominantColorPromise });
     return;
   }
   if (message.type === 'decode-error') {
     clearTimeout(pending.timeout);
     heicDecoderPending.delete(message.id);
+    pending.resolveDominantColor(null);
     pending.reject(new Error(message.message || 'HEIC decode failed'));
   }
 }
@@ -2277,9 +2314,15 @@ function resetHeicDecoderWorker(error, failedWorker = heicDecoderWorker) {
   if (rejectReady) rejectReady(reason);
   for (const pending of heicDecoderPending.values()) {
     clearTimeout(pending.timeout);
+    pending.resolveDominantColor(null);
     pending.reject(reason);
   }
   heicDecoderPending.clear();
+  for (const pendingColor of heicDominantColorPending.values()) {
+    clearTimeout(pendingColor.timeout);
+    pendingColor.resolve(null);
+  }
+  heicDominantColorPending.clear();
 }
 
 function convertHeicInWorker(file, readyWorker) {
@@ -2298,11 +2341,16 @@ async function postHeicDecodeRequest(file, readyWorker) {
   }
   const id = 'heic-' + Date.now() + '-' + (++nextHeicDecodeId);
 
+  let resolveDominantColor;
+  const dominantColorPromise = new Promise(function (resolveColor) {
+    resolveDominantColor = resolveColor;
+  });
+
   return new Promise(function (resolve, reject) {
     const timeout = setTimeout(function () {
       resetHeicDecoderWorker(new Error('HEIC decode timed out'), worker);
     }, HEIC_DECODE_TIMEOUT_MS);
-    heicDecoderPending.set(id, { resolve, reject, timeout });
+    heicDecoderPending.set(id, { resolve, reject, timeout, dominantColorPromise, resolveDominantColor });
     try {
       worker.postMessage({ type: 'decode', id, file });
     } catch (error) {
@@ -2337,13 +2385,13 @@ async function loadHeicPhotoImage(file) {
   const decoderResult = await decoderResultPromise;
   if (decoderResult.error) throw decoderResult.error;
   const converted = await convertHeicInWorker(file, decoderResult.worker);
-  const src = URL.createObjectURL(converted);
+  const src = URL.createObjectURL(converted.blob);
   try {
     const [dataUrl, image] = await Promise.all([
-      fileToDataUrl(converted),
+      fileToDataUrl(converted.blob),
       loadImage(src),
     ]);
-    return { src, dataUrl, image };
+    return { src, dataUrl, image, dominantColorPromise: converted.dominantColorPromise };
   } catch (error) {
     URL.revokeObjectURL(src);
     throw error;
@@ -2367,7 +2415,7 @@ function handleResetUpload() {
 
 function resetApp() {
   state.uploadGeneration += 1;
-  if (heicDecoderPending.size > 0) {
+  if (heicDecoderPending.size > 0 || heicDominantColorPending.size > 0) {
     resetHeicDecoderWorker(new Error('upload cancelled'));
   }
   state.pendingPhotoSlots = 0;

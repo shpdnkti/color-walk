@@ -61,5 +61,6 @@ test('preloads the decoder silently from upload intent without forcing conversio
 
 test('cancels active decoder work while preserving an idle warm worker', () => {
   assert.match(appSource, /onPhotoCancelled: revokePhotoUrl/);
-  assert.match(appSource, /if \(heicDecoderPending\.size > 0\) \{\s*resetHeicDecoderWorker\(new Error\('upload cancelled'\)\);\s*\}/);
+  assert.match(appSource, /if [(]heicDecoderPending[.]size > 0 [|][|] heicDominantColorPending[.]size > 0[)]/);
+  assert.match(appSource, /resetHeicDecoderWorker.*upload cancelled/);
 });
