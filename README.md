@@ -106,6 +106,13 @@ docker compose -f docker-compose.preview.yml config
 COLOR_WALK_RUN_EXPORT_PREVIEW_SMOKE=1 npm run test:export-preview
 ```
 
+图片宽高比回归覆盖横图、竖图、方图、带方向信息的 HEIC、全部输出比例、缩放/拖动、草稿恢复和两种导出路径：
+
+```bash
+npm run test:image-aspect
+npm run test:image-crop-drag
+```
+
 HEIC 上传回归检查默认使用仓库内无元数据的匿名样本；也可以指定本地原图复测，原图只在浏览器内读取，不会提交到仓库：
 
 ```bash

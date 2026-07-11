@@ -102,6 +102,7 @@ test('documents opt-in browser regression checks', async () => {
   assert.equal(packageJson.scripts['test:heic-worker'], 'COLOR_WALK_RUN_HEIC_BROWSER=1 node --test test/server-ai.test.js');
   assert.equal(packageJson.scripts['test:upload-enrichment'], 'node scripts/upload-progressive-regression.mjs');
   assert.equal(packageJson.scripts['test:heic-progressive'], 'node scripts/progressive-upload-regression.mjs');
+  assert.equal(packageJson.scripts['test:image-aspect'], 'node scripts/image-aspect-regression.mjs');
   assert.equal(packageJson.scripts['bench:heic-first-preview'], 'node scripts/heic-first-preview-benchmark.mjs');
   assert.match(readme, /npm run test:export-preview/);
   assert.match(readme, /COLOR_WALK_RUN_EXPORT_PREVIEW_SMOKE=1/);
@@ -109,5 +110,7 @@ test('documents opt-in browser regression checks', async () => {
   assert.match(readme, /npm run test:upload-enrichment/);
   assert.match(readme, /npm run test:heic-progressive/);
   assert.match(readme, /npm run test:heic-worker/);
+  assert.match(readme, /npm run test:image-aspect/);
+  assert.match(readme, /npm run test:image-crop-drag/);
   assert.match(readme, /npm run bench:heic-first-preview/);
 });

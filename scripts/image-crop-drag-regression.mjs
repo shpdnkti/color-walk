@@ -52,30 +52,49 @@ try {
     await page.waitForSelector('.movie-photo.has-photo img');
     await page.waitForFunction(function () {
       const photo = document.querySelector('.movie-photo.has-photo');
-      return Number(photo?.style.getPropertyValue('--image-cover-width') || 1) > 1;
+      return Number(photo?.style.getPropertyValue('--image-contain-height') || 1) < 1;
     }, null, { timeout: 1000 });
 
+    const contained = await readCropProbe(page);
+    assert.equal(contained.scale, '1.000');
+    assert.ok(
+      contained.imageWidth <= contained.frameWidth + 1,
+      'wide photo should be fully contained at 100%, got image/frame widths ' + contained.imageWidth + '/' + contained.frameWidth
+    );
+
+    await page.locator('.photo-crop-slider').evaluate(function (input) {
+      input.value = '200';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForFunction(function () {
+      return document.querySelector('.movie-photo')?.style.getPropertyValue('--image-scale').trim() === '2.000';
+    });
+    await page.waitForFunction(function () {
+      const frame = document.querySelector('.movie-photo');
+      const image = frame?.querySelector('img');
+      return image?.getBoundingClientRect().width > frame.getBoundingClientRect().width + 1;
+    });
     const before = await readCropProbe(page);
     await dragMoviePhoto(page, 96, 0);
     const after = await readCropProbe(page);
 
-    assert.equal(before.scale, '1.000');
-    assert.equal(after.scale, '1.000');
+    assert.equal(before.scale, '2.000');
+    assert.equal(after.scale, '2.000');
     assert.ok(
       before.imageWidth > before.frameWidth + 1,
-      'wide photo should render as an oversized cover image at 100%, got image/frame widths ' + before.imageWidth + '/' + before.frameWidth
+      'wide photo should become larger than its frame after zooming, got image/frame widths ' + before.imageWidth + '/' + before.frameWidth
     );
     assert.notEqual(
       after.translateX,
       before.translateX,
-      'wide photo should be draggable at 100% crop scale when cover-cropped by the canvas ratio'
+      'wide photo should be draggable after the user zooms beyond contain mode'
     );
     assert.ok(
       Math.abs(parseFloat(after.translateX)) > 1,
       'drag should produce a visible horizontal crop offset, got ' + after.translateX
     );
 
-    console.log('PASS image crop drag regression: wide photo can be dragged at 100% crop scale.');
+    console.log('PASS image crop drag regression: wide photo is contained at 100% and draggable after zooming.');
   }
 } finally {
   if (browser) await browser.close();
