@@ -2,7 +2,12 @@ import { buildPaletteSummary, findDominantColor, getReadableTextColor } from './
 import { parseDraft, serializeDraft } from './draft.js';
 import { extractPhotoMetadata } from './exif.js';
 import { buildReverseGeocodeUrl, formatReverseGeocodeLabel } from './geocode.js';
-import { clampPhotoTransformToFit, getPhotoFitRatios } from './image-transform.js';
+import {
+  PHOTO_SCALE_MAX,
+  PHOTO_SCALE_MIN,
+  clampPhotoTransformToFit,
+  getPhotoFitRatios,
+} from './image-transform.js';
 import { buildUploadStatusMessage, isHeicFile, processUploadFiles } from './upload.js';
 import {
   describeColor,
@@ -1054,14 +1059,14 @@ function createPhotoCropControls(photo) {
   const slider = document.createElement('input');
   slider.className = 'photo-crop-slider';
   slider.type = 'range';
-  slider.min = '100';
-  slider.max = '400';
+  slider.min = String(Math.round((PHOTO_SCALE_MIN - 1) * 100));
+  slider.max = String(Math.round((PHOTO_SCALE_MAX - 1) * 100));
   slider.step = '5';
   slider.setAttribute('aria-label', '调整 ' + photo.fileName + ' 裁切缩放');
   slider.addEventListener('input', function (event) {
     event.stopPropagation();
-    setPhotoCropScale(photo.id, Number(slider.value) / 100);
-    els.exportStatus.textContent = '图片裁切缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+    setPhotoCropScale(photo.id, 1 + Number(slider.value) / 100);
+    els.exportStatus.textContent = '图片裁切调整至 ' + formatPhotoCropPercent(getPhotoTransform(photo.id).scale) + '。';
   });
   field.append(labelRow, slider);
 
@@ -1091,7 +1096,7 @@ function createPhotoCropButton(photo, action, label, ariaLabel) {
     if (action === 'reset') resetPhotoTransform(photo.id);
     els.exportStatus.textContent = action === 'reset'
       ? '图片裁切已重置。'
-      : '图片裁切缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+      : '图片裁切调整至 ' + formatPhotoCropPercent(getPhotoTransform(photo.id).scale) + '。';
   });
   return button;
 }
@@ -1117,17 +1122,28 @@ function stopPhotoCardControlEvent(event) {
   event.stopPropagation();
 }
 
+function getPhotoCropPercent(scale) {
+  return Math.round(((Number(scale) || 1) - 1) * 100);
+}
+
+function formatPhotoCropPercent(scale) {
+  const percent = getPhotoCropPercent(scale);
+  return (percent > 0 ? '+' : '') + percent + '%';
+}
+
 function updatePhotoCropControls(controls, photoId) {
   const transform = getPhotoTransform(photoId);
-  const percent = Math.round(transform.scale * 100);
+  const cropPercent = getPhotoCropPercent(transform.scale);
   const slider = controls.querySelector('.photo-crop-slider');
   const value = controls.querySelector('.photo-crop-value');
   const zoomOut = controls.querySelector('[data-crop-action="zoom-out"]');
+  const zoomIn = controls.querySelector('[data-crop-action="zoom-in"]');
   const reset = controls.querySelector('[data-crop-action="reset"]');
-  if (slider) slider.value = String(percent);
-  if (value) value.textContent = percent + '%';
-  if (zoomOut) zoomOut.disabled = percent <= 100;
-  if (reset) reset.disabled = percent <= 100 && transform.x === 0 && transform.y === 0;
+  if (slider) slider.value = String(cropPercent);
+  if (value) value.textContent = formatPhotoCropPercent(transform.scale);
+  if (zoomOut) zoomOut.disabled = cropPercent <= getPhotoCropPercent(PHOTO_SCALE_MIN);
+  if (zoomIn) zoomIn.disabled = cropPercent >= getPhotoCropPercent(PHOTO_SCALE_MAX);
+  if (reset) reset.disabled = cropPercent === 0 && transform.x === 0 && transform.y === 0;
 }
 
 function syncPhotoCropControls(photoId) {
@@ -1424,7 +1440,7 @@ function bindImageTransformEvents(imageWrap, photo) {
       y: transform.y,
     }, imageWrap);
     applyPhotoTransformToElement(imageWrap, photo.id);
-    els.exportStatus.textContent = '图片焦点缩放至 ' + Math.round(getPhotoTransform(photo.id).scale * 100) + '%。';
+    els.exportStatus.textContent = '图片裁切调整至 ' + formatPhotoCropPercent(getPhotoTransform(photo.id).scale) + '。';
   }, { passive: false });
 
   imageWrap.addEventListener('pointerdown', function (event) {

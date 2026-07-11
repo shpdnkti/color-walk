@@ -1,3 +1,6 @@
+export const PHOTO_SCALE_MIN = 0.2;
+export const PHOTO_SCALE_MAX = 4;
+
 export function getPhotoFitRatios(photoRatio, frameRatio) {
   const safePhotoRatio = Number(photoRatio);
   const safeFrameRatio = Number(frameRatio);
@@ -16,16 +19,16 @@ export function getPhotoFitRatios(photoRatio, frameRatio) {
 export function calculatePhotoOffsetBounds(fitRatios, scale) {
   const width = Number(fitRatios?.width) || 1;
   const height = Number(fitRatios?.height) || 1;
-  const safeScale = Number(scale) || 1;
+  const safeScale = clamp(Number(scale) || 1, PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
   return {
-    x: Math.max(0, (width * safeScale - 1) / 2),
-    y: Math.max(0, (height * safeScale - 1) / 2),
+    x: Math.abs(width * safeScale - 1) / 2,
+    y: Math.abs(height * safeScale - 1) / 2,
   };
 }
 
 export function clampPhotoTransformToFit(transform, fitRatios) {
   const safeTransform = transform || {};
-  const scale = clamp(Number(safeTransform.scale) || 1, 1, 4);
+  const scale = clamp(Number(safeTransform.scale) || 1, PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
   const bounds = calculatePhotoOffsetBounds(fitRatios, scale);
   return {
     scale,
