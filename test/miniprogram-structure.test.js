@@ -52,6 +52,7 @@ test('package exposes miniprogram validation and release scripts', async () => {
 test('GitHub workflow validates and can deploy the miniprogram', async () => {
   const workflow = await readProjectFile('.github/workflows/wechat-miniprogram.yml');
 
+  assert.match(workflow, /npx playwright install --with-deps chromium/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /npm run miniprogram:validate/);
   assert.match(workflow, /npm install --no-save miniprogram-ci@2\.1\.31/);
