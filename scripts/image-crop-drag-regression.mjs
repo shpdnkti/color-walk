@@ -35,6 +35,14 @@ try {
 
   if (browser) {
     const page = await browser.newPage({ viewport: { width: 1024, height: 900 }, deviceScaleFactor: 1 });
+    await page.addInitScript(function () {
+      const createObjectURL = URL.createObjectURL.bind(URL);
+      window.__imageCropExportCount = 0;
+      URL.createObjectURL = function (blob) {
+        window.__imageCropExportCount += 1;
+        return createObjectURL(blob);
+      };
+    });
     await page.goto('http://127.0.0.1:' + port + '/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(function () { localStorage.clear(); });
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -52,49 +60,91 @@ try {
     await page.waitForSelector('.movie-photo.has-photo img');
     await page.waitForFunction(function () {
       const photo = document.querySelector('.movie-photo.has-photo');
-      return Number(photo?.style.getPropertyValue('--image-contain-height') || 1) < 1;
+      return Number(photo?.style.getPropertyValue('--image-fit-height') || 1) < 1;
     }, null, { timeout: 1000 });
+    const before = await readCropProbe(page);
+    await dragMoviePhoto(page, 96, 0);
+    const afterDefaultDrag = await readCropProbe(page);
 
-    const contained = await readCropProbe(page);
-    assert.equal(contained.scale, '1.000');
+    assert.equal(before.scale, '1.000');
     assert.ok(
-      contained.imageWidth <= contained.frameWidth + 1,
-      'wide photo should be fully contained at 100%, got image/frame widths ' + contained.imageWidth + '/' + contained.frameWidth
+      isFullyVisible(before),
+      'wide photo should be fully visible at the default crop, got image/frame bounds ' + JSON.stringify(before)
+    );
+    assert.equal(
+      afterDefaultDrag.translateX,
+      before.translateX,
+      'default-crop photo should not pan beyond its fully visible fitted bounds'
+    );
+    assert.ok(
+      isFullyVisible(afterDefaultDrag),
+      'default-crop photo should remain fully visible after a drag attempt, got ' + JSON.stringify(afterDefaultDrag)
     );
 
-    await page.locator('.photo-crop-slider').evaluate(function (input) {
-      input.value = '200';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await page.waitForFunction(function () {
-      return document.querySelector('.movie-photo')?.style.getPropertyValue('--image-scale').trim() === '2.000';
-    });
-    await page.waitForFunction(function () {
-      const frame = document.querySelector('.movie-photo');
-      const image = frame?.querySelector('img');
-      return image?.getBoundingClientRect().width > frame.getBoundingClientRect().width + 1;
-    });
-    const before = await readCropProbe(page);
+    const exportedColors = await exportPhotoPixels(page, [
+      { x: 1 / 6, y: 0.75 },
+      { x: 1 / 2, y: 0.75 },
+      { x: 5 / 6, y: 0.75 },
+    ]);
+    assert.ok(isNearColor(exportedColors[0], [233, 80, 63], 24), 'export should retain the red left edge, got ' + exportedColors[0]);
+    assert.ok(isNearColor(exportedColors[1], [67, 168, 111], 24), 'export should retain the green center, got ' + exportedColors[1]);
+    assert.ok(isNearColor(exportedColors[2], [52, 104, 216], 24), 'export should retain the blue right edge, got ' + exportedColors[2]);
+
+    await setCropScale(page, 200);
+    const zoomed = await readCropProbe(page);
     await dragMoviePhoto(page, 96, 0);
     const after = await readCropProbe(page);
 
-    assert.equal(before.scale, '2.000');
+    assert.equal(zoomed.scale, '2.000');
     assert.equal(after.scale, '2.000');
     assert.ok(
-      before.imageWidth > before.frameWidth + 1,
-      'wide photo should become larger than its frame after zooming, got image/frame widths ' + before.imageWidth + '/' + before.frameWidth
+      zoomed.imageWidth > zoomed.frameWidth + 1,
+      'user crop adjustment should be able to enlarge the fitted image, got image/frame widths ' + zoomed.imageWidth + '/' + zoomed.frameWidth
     );
     assert.notEqual(
       after.translateX,
-      before.translateX,
-      'wide photo should be draggable after the user zooms beyond contain mode'
+      zoomed.translateX,
+      'wide photo should be draggable after the user enlarges it'
     );
     assert.ok(
       Math.abs(parseFloat(after.translateX)) > 1,
       'drag should produce a visible horizontal crop offset, got ' + after.translateX
     );
 
-    console.log('PASS image crop drag regression: wide photo is contained at 100% and draggable after zooming.');
+    const adjustedDomColors = await exportPhotoPixels(page, [
+      { x: 0.3, y: 0.75 },
+      { x: 0.5, y: 0.75 },
+    ]);
+    assert.ok(isNearColor(adjustedDomColors[0], [233, 80, 63], 24), 'scaled DOM export should preserve normalized drag distance, got ' + adjustedDomColors[0]);
+    assert.ok(isNearColor(adjustedDomColors[1], [67, 168, 111], 24), 'scaled DOM export should retain the expected center segment, got ' + adjustedDomColors[1]);
+
+    await setCropScale(page, 400);
+    await page.locator('#customColorInput').evaluate(function (input) {
+      input.value = '#000000';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const adjustedFallbackColors = await exportPhotoPixels(page, [
+      { x: 0.5, y: 0.4 },
+      { x: 0.5, y: 0.75 },
+    ], { forceCanvasFallback: true });
+    assert.ok(isNearColor(adjustedFallbackColors[0], [0, 0, 0], 8), 'fallback export should clip the enlarged photo at the photo frame, got ' + adjustedFallbackColors[0]);
+    assert.ok(isNearColor(adjustedFallbackColors[1], [67, 168, 111], 24), 'fallback export should retain the adjusted photo inside its frame, got ' + adjustedFallbackColors[1]);
+
+    await dragMoviePhoto(page, 0, 96);
+    await page.locator('#ratioInput').evaluate(function (input) {
+      input.value = '35';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForFunction(function () {
+      const photo = document.querySelector('.movie-photo.has-photo');
+      return Number(photo?.style.getPropertyValue('--image-fit-height')) < 0.4;
+    });
+    const reframedFallbackColor = await exportPhotoPixels(page, [
+      { x: 0.5, y: 0.37 },
+    ]);
+    assert.ok(isNearColor(reframedFallbackColor[0], [67, 168, 111], 24), 'fallback export should re-clamp a persisted offset after the photo frame ratio changes, got ' + reframedFallbackColor[0]);
+
+    console.log('PASS image crop regression: wide photo starts fully visible and remains user-adjustable.');
   }
 } finally {
   if (browser) await browser.close();
@@ -105,7 +155,7 @@ async function uploadGeneratedWidePhoto(page) {
   const buffer = await page.evaluate(async function () {
     const canvas = document.createElement('canvas');
     canvas.width = 480;
-    canvas.height = 80;
+    canvas.height = 160;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#e9503f';
     ctx.fillRect(0, 0, 160, canvas.height);
@@ -139,17 +189,91 @@ async function dragMoviePhoto(page, deltaX, deltaY) {
   await page.mouse.up();
 }
 
+async function setCropScale(page, percent) {
+  await page.locator('.photo-crop-slider').evaluate(function (slider, value) {
+    slider.value = String(value);
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+  }, percent);
+  await page.waitForFunction(function (expectedScale) {
+    const photo = document.querySelector('.movie-photo.has-photo');
+    return photo?.style.getPropertyValue('--image-scale').trim() === expectedScale;
+  }, (percent / 100).toFixed(3));
+  await page.waitForFunction(function () {
+    const photo = document.querySelector('.movie-photo.has-photo');
+    const image = photo?.querySelector('img');
+    if (!photo || !image) return false;
+    return image.getBoundingClientRect().width > photo.getBoundingClientRect().width + 1;
+  });
+}
+
+async function exportPhotoPixels(page, points, { forceCanvasFallback = false } = {}) {
+  if (forceCanvasFallback) {
+    await page.evaluate(function () {
+      Object.defineProperty(window, 'XMLSerializer', {
+        configurable: true,
+        value: class BrokenXmlSerializer {
+          serializeToString() {
+            throw new Error('force_canvas_export_fallback');
+          }
+        },
+      });
+    });
+  }
+  const previousExportCount = await page.evaluate(function () {
+    return window.__imageCropExportCount;
+  });
+  await page.click('#exportButton');
+  await page.waitForFunction(function (previousCount) {
+    return window.__imageCropExportCount > previousCount;
+  }, previousExportCount);
+  return page.evaluate(function (samplePoints) {
+    const canvas = document.querySelector('#exportCanvas');
+    const ctx = canvas.getContext('2d');
+    return samplePoints.map(function (point) {
+      const x = Math.round(canvas.width * point.x);
+      const y = Math.round(canvas.height * point.y);
+      return Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+    });
+  }, points);
+}
+
 async function readCropProbe(page) {
   return page.evaluate(function () {
     const photo = document.querySelector('.movie-photo.has-photo');
     const image = photo.querySelector('img');
+    const frameRect = photo.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
     return {
       scale: photo.style.getPropertyValue('--image-scale').trim(),
       translateX: photo.style.getPropertyValue('--image-translate-x').trim(),
       translateY: photo.style.getPropertyValue('--image-translate-y').trim(),
-      frameWidth: photo.getBoundingClientRect().width,
-      imageWidth: image.getBoundingClientRect().width,
+      frameLeft: frameRect.left,
+      frameTop: frameRect.top,
+      frameRight: frameRect.right,
+      frameBottom: frameRect.bottom,
+      frameWidth: frameRect.width,
+      frameHeight: frameRect.height,
+      imageLeft: imageRect.left,
+      imageTop: imageRect.top,
+      imageRight: imageRect.right,
+      imageBottom: imageRect.bottom,
+      imageWidth: imageRect.width,
+      imageHeight: imageRect.height,
     };
+  });
+}
+
+function isFullyVisible(probe) {
+  const tolerance = 1;
+  return probe.imageLeft >= probe.frameLeft - tolerance
+    && probe.imageTop >= probe.frameTop - tolerance
+    && probe.imageRight <= probe.frameRight + tolerance
+    && probe.imageBottom <= probe.frameBottom + tolerance;
+}
+
+function isNearColor(actual, expected, tolerance) {
+  return actual.every(function (channel, index) {
+    return Math.abs(channel - expected[index]) <= tolerance;
   });
 }
 
