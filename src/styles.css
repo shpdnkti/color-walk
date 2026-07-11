@@ -19,8 +19,8 @@
   --image-scale: 1;
   --image-translate-x: 0px;
   --image-translate-y: 0px;
-  --image-cover-width: 1;
-  --image-cover-height: 1;
+  --image-contain-width: 1;
+  --image-contain-height: 1;
   --movie-color-ratio: 50%;
   --movie-card-ratio: 1;
   --movie-text-color: #ffffff;
@@ -549,13 +549,14 @@ p {
   height: 100%;
   min-height: 0;
   aspect-ratio: auto;
+  background: #111a24;
 }
 
 .movie-poster-inner.has-photo .movie-photo img {
-  width: calc(100% * var(--image-cover-width, 1));
-  height: calc(100% * var(--image-cover-height, 1));
+  width: calc(100% * var(--image-contain-width, 1));
+  height: calc(100% * var(--image-contain-height, 1));
   max-width: none;
-  object-fit: fill;
+  object-fit: contain;
 }
 
 .movie-poster-inner.color-top {

@@ -15,7 +15,8 @@
     "test:heic-upload": "node scripts/heic-upload-regression.mjs",
     "test:heic-worker": "COLOR_WALK_RUN_HEIC_BROWSER=1 node --test test/server-ai.test.js",
     "test:upload-enrichment": "node scripts/upload-progressive-regression.mjs",
-    "test:heic-progressive": "node scripts/progressive-upload-regression.mjs"
+    "test:heic-progressive": "node scripts/progressive-upload-regression.mjs",
+    "test:image-aspect": "node scripts/image-aspect-regression.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1"

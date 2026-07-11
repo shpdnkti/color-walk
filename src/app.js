@@ -1282,6 +1282,7 @@ function renderPreview() {
   if (isMoviePoster) {
     renderMoviePoster(inner);
     els.previewCanvas.append(inner);
+    if (hasMoviePhoto) applyPhotoTransformToPreviewInstances(state.photos[0].id);
     scheduleDraftSave();
     return;
   }
@@ -1537,13 +1538,22 @@ function resetPhotoTransform(photoId) {
 }
 
 function applyPhotoTransformToPreviewInstances(photoId) {
-  els.previewCanvas.querySelectorAll('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]').forEach(function (element) {
+  const elements = Array.from(els.previewCanvas.querySelectorAll('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]'));
+  const moviePhoto = elements.find(function (element) { return element.classList.contains('movie-photo'); });
+  if (moviePhoto) {
+    const current = getPhotoTransform(photoId);
+    const clamped = clampPhotoTransform(current, photoId, moviePhoto);
+    if (clamped.scale !== current.scale || clamped.x !== current.x || clamped.y !== current.y) {
+      state.photoTransforms.set(photoId, clamped);
+    }
+  }
+  elements.forEach(function (element) {
     applyPhotoTransformToElement(element, photoId);
   });
 }
 
 function applyPhotoTransformToElement(element, photoId) {
-  applyPhotoCoverVarsToElement(element, photoId);
+  applyPhotoContainVarsToElement(element, photoId);
   const transform = clampPhotoTransform(getPhotoTransform(photoId), photoId, element);
   const offsetX = Math.round(transform.x * Math.max(1, element.clientWidth));
   const offsetY = Math.round(transform.y * Math.max(1, element.clientHeight));
@@ -1552,12 +1562,12 @@ function applyPhotoTransformToElement(element, photoId) {
   element.style.setProperty('--image-translate-y', offsetY + 'px');
 }
 
-function applyPhotoCoverVarsToElement(element, photoId) {
+function applyPhotoContainVarsToElement(element, photoId) {
   const photo = getPhotoById(photoId);
   const frameRatio = getPhotoFrameRatio(photoId, element);
-  const ratios = getPhotoCoverRatios(photo, frameRatio);
-  element.style.setProperty('--image-cover-width', ratios.width.toFixed(6));
-  element.style.setProperty('--image-cover-height', ratios.height.toFixed(6));
+  const ratios = getPhotoFitRatios(photo, frameRatio, 'contain');
+  element.style.setProperty('--image-contain-width', ratios.width.toFixed(6));
+  element.style.setProperty('--image-contain-height', ratios.height.toFixed(6));
 }
 
 function clampPhotoTransform(transform, photoId, sourceElement) {
@@ -1572,27 +1582,28 @@ function clampPhotoTransform(transform, photoId, sourceElement) {
 
 function getPhotoOffsetBounds(photoId, sourceElement, scale) {
   const photo = getPhotoById(photoId);
-  const frameRatio = getPhotoFrameRatio(photoId, sourceElement);
-  const ratios = getPhotoCoverRatios(photo, frameRatio);
+  const element = sourceElement || els.previewCanvas.querySelector('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]');
+  const frameRatio = getPhotoFrameRatio(photoId, element);
+  const fitMode = element?.classList.contains('movie-photo') ? 'contain' : 'cover';
+  const ratios = getPhotoFitRatios(photo, frameRatio, fitMode);
   return {
     x: Math.min(0.48, Math.max(0, (ratios.width * scale - 1) / 2)),
     y: Math.min(0.48, Math.max(0, (ratios.height * scale - 1) / 2)),
   };
 }
 
-function getPhotoCoverRatios(photo, frameRatio) {
+function getPhotoFitRatios(photo, frameRatio, fitMode) {
   const photoRatio = getPhotoAspectRatio(photo);
   const safeFrameRatio = Number.isFinite(frameRatio) && frameRatio > 0 ? frameRatio : photoRatio;
   if (!Number.isFinite(photoRatio) || photoRatio <= 0 || !Number.isFinite(safeFrameRatio) || safeFrameRatio <= 0) {
     return { width: 1, height: 1 };
   }
-  if (photoRatio > safeFrameRatio) {
-    return { width: photoRatio / safeFrameRatio, height: 1 };
-  }
-  if (photoRatio < safeFrameRatio) {
-    return { width: 1, height: safeFrameRatio / photoRatio };
-  }
-  return { width: 1, height: 1 };
+  const relativeWidth = photoRatio / safeFrameRatio;
+  const resolveRatio = fitMode === 'contain' ? Math.min : Math.max;
+  return {
+    width: resolveRatio(1, relativeWidth),
+    height: resolveRatio(1, 1 / relativeWidth),
+  };
 }
 
 function getPhotoFrameRatio(photoId, sourceElement) {
@@ -1925,7 +1936,7 @@ function drawExportMoviePoster(ctx, width, height, mainColor) {
   if (radius > 0) roundedClip(ctx, posterX, posterY, posterW, posterH, radius);
   ctx.fillStyle = mainColor;
   ctx.fillRect(posterX, colorY, posterW, colorH);
-  drawPhotoCover(ctx, photo, posterX, imageY, posterW, imageH, '#111a24');
+  drawPhotoContain(ctx, photo, posterX, imageY, posterW, imageH, '#111a24');
   ctx.restore();
 
   drawExportCoverText(ctx, { x: posterX, y: colorY, w: posterW, h: colorH }, true, 'center');
@@ -2115,22 +2126,6 @@ function drawImageCover(ctx, image, x, y, w, h) {
 
 function drawPhotoContain(ctx, photo, x, y, w, h, background) {
   drawImageContain(ctx, photo.image, x, y, w, h, background, getPhotoTransform(photo.id));
-}
-
-function drawPhotoCover(ctx, photo, x, y, w, h, background) {
-  drawImageCoverTransform(ctx, photo.image, x, y, w, h, background, getPhotoTransform(photo.id));
-}
-
-function drawImageCoverTransform(ctx, image, x, y, w, h, background, transform) {
-  const photoTransform = transform || { scale: 1, x: 0, y: 0 };
-  ctx.fillStyle = background || '#f3f4f6';
-  ctx.fillRect(x, y, w, h);
-  const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight) * photoTransform.scale;
-  const dw = image.naturalWidth * scale;
-  const dh = image.naturalHeight * scale;
-  const dx = x + (w - dw) / 2 + photoTransform.x * w;
-  const dy = y + (h - dh) / 2 + photoTransform.y * h;
-  ctx.drawImage(image, dx, dy, dw, dh);
 }
 
 function drawImageContain(ctx, image, x, y, w, h, background, transform) {
