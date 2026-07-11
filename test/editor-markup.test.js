@@ -97,7 +97,9 @@ test('drives preview style from the required CSS variable names', () => {
 
 test('keeps canvas images at natural ratio without fixed image heights', () => {
   assert.match(css, /\.preview-image\s*\{[\s\S]*?aspect-ratio:\s*var\(--raw-ratio,\s*1\);/);
-  assert.match(css, /\.preview-image img\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*auto;[\s\S]*?object-fit:\s*contain;/);
+  assert.match(css, /\.preview-image img\s*\{[\s\S]*?--image-fit-width[\s\S]*?--image-fit-height[\s\S]*?object-fit:\s*contain;/);
+  assert.match(appJs, /function applyPhotoFitVarsToElement[\s\S]*?--image-fit-width[\s\S]*?--image-fit-height/);
+  assert.doesNotMatch(css, /--image-(?:cover|contain)-(?:width|height)/);
   assert.doesNotMatch(css, /\.layout-movie-poster\s*\{[\s\S]*?height:\s*min\(/);
   assert.doesNotMatch(css, /--poster-padding/);
   assert.doesNotMatch(css, /--poster-radius/);
@@ -197,6 +199,13 @@ test('binds non-destructive image transform controls inside preview masks', () =
   assert.match(appJs, /function drawPhotoContain/);
   assert.match(css, /\.preview-image img\s*\{[\s\S]*?transform:/);
   assert.match(css, /\.preview-image\.is-transforming/);
+});
+
+test('keeps movie poster preview and fallback export on the same contain baseline', () => {
+  assert.match(appJs, /function drawExportMoviePoster[\s\S]*?drawPhotoContain\(/);
+  assert.match(appJs, /function drawPhotoContain[\s\S]*?clampPhotoTransformToFit/);
+  assert.match(appJs, /function drawImageContain[\s\S]*?ctx\.rect\(x, y, w, h\);[\s\S]*?ctx\.clip\(\)/);
+  assert.doesNotMatch(appJs, /drawPhotoCover/);
 });
 
 test('exposes discoverable per-photo crop controls from the palette photo cards', () => {

@@ -2,6 +2,7 @@ import { buildPaletteSummary, findDominantColor, getReadableTextColor } from './
 import { parseDraft, serializeDraft } from './draft.js';
 import { extractPhotoMetadata } from './exif.js';
 import { buildReverseGeocodeUrl, formatReverseGeocodeLabel } from './geocode.js';
+import { clampPhotoTransformToFit, getPhotoFitRatios } from './image-transform.js';
 import { buildUploadStatusMessage, isHeicFile, processUploadFiles } from './upload.js';
 import {
   describeColor,
@@ -1553,57 +1554,29 @@ function applyPhotoTransformToPreviewInstances(photoId) {
 }
 
 function applyPhotoTransformToElement(element, photoId) {
-  applyPhotoContainVarsToElement(element, photoId);
-  const transform = clampPhotoTransform(getPhotoTransform(photoId), photoId, element);
-  const offsetX = Math.round(transform.x * Math.max(1, element.clientWidth));
-  const offsetY = Math.round(transform.y * Math.max(1, element.clientHeight));
+  const fitRatios = applyPhotoFitVarsToElement(element, photoId);
+  const transform = clampPhotoTransformToFit(getPhotoTransform(photoId), fitRatios);
+  const offsetX = (transform.x / fitRatios.width) * 100;
+  const offsetY = (transform.y / fitRatios.height) * 100;
   element.style.setProperty('--image-scale', transform.scale.toFixed(3));
-  element.style.setProperty('--image-translate-x', offsetX + 'px');
-  element.style.setProperty('--image-translate-y', offsetY + 'px');
+  element.style.setProperty('--image-translate-x', offsetX.toFixed(6) + '%');
+  element.style.setProperty('--image-translate-y', offsetY.toFixed(6) + '%');
 }
 
-function applyPhotoContainVarsToElement(element, photoId) {
+function applyPhotoFitVarsToElement(element, photoId) {
   const photo = getPhotoById(photoId);
   const frameRatio = getPhotoFrameRatio(photoId, element);
-  const ratios = getPhotoFitRatios(photo, frameRatio, 'contain');
-  element.style.setProperty('--image-contain-width', ratios.width.toFixed(6));
-  element.style.setProperty('--image-contain-height', ratios.height.toFixed(6));
+  const ratios = getPhotoFitRatios(getPhotoAspectRatio(photo), frameRatio);
+  element.style.setProperty('--image-fit-width', ratios.width.toFixed(6));
+  element.style.setProperty('--image-fit-height', ratios.height.toFixed(6));
+  return ratios;
 }
 
 function clampPhotoTransform(transform, photoId, sourceElement) {
-  const scale = clamp(transform.scale || 1, 1, 4);
-  const bounds = getPhotoOffsetBounds(photoId, sourceElement, scale);
-  return {
-    scale,
-    x: clamp(transform.x || 0, -bounds.x, bounds.x),
-    y: clamp(transform.y || 0, -bounds.y, bounds.y),
-  };
-}
-
-function getPhotoOffsetBounds(photoId, sourceElement, scale) {
   const photo = getPhotoById(photoId);
-  const element = sourceElement || els.previewCanvas.querySelector('.preview-image[data-photo-id="' + cssEscape(photoId) + '"]');
-  const frameRatio = getPhotoFrameRatio(photoId, element);
-  const fitMode = element?.classList.contains('movie-photo') ? 'contain' : 'cover';
-  const ratios = getPhotoFitRatios(photo, frameRatio, fitMode);
-  return {
-    x: Math.min(0.48, Math.max(0, (ratios.width * scale - 1) / 2)),
-    y: Math.min(0.48, Math.max(0, (ratios.height * scale - 1) / 2)),
-  };
-}
-
-function getPhotoFitRatios(photo, frameRatio, fitMode) {
-  const photoRatio = getPhotoAspectRatio(photo);
-  const safeFrameRatio = Number.isFinite(frameRatio) && frameRatio > 0 ? frameRatio : photoRatio;
-  if (!Number.isFinite(photoRatio) || photoRatio <= 0 || !Number.isFinite(safeFrameRatio) || safeFrameRatio <= 0) {
-    return { width: 1, height: 1 };
-  }
-  const relativeWidth = photoRatio / safeFrameRatio;
-  const resolveRatio = fitMode === 'contain' ? Math.min : Math.max;
-  return {
-    width: resolveRatio(1, relativeWidth),
-    height: resolveRatio(1, 1 / relativeWidth),
-  };
+  const frameRatio = getPhotoFrameRatio(photoId, sourceElement);
+  const fitRatios = getPhotoFitRatios(getPhotoAspectRatio(photo), frameRatio);
+  return clampPhotoTransformToFit(transform, fitRatios);
 }
 
 function getPhotoFrameRatio(photoId, sourceElement) {
@@ -2125,11 +2098,17 @@ function drawImageCover(ctx, image, x, y, w, h) {
 }
 
 function drawPhotoContain(ctx, photo, x, y, w, h, background) {
-  drawImageContain(ctx, photo.image, x, y, w, h, background, getPhotoTransform(photo.id));
+  const fitRatios = getPhotoFitRatios(getPhotoAspectRatio(photo), w / h);
+  const transform = clampPhotoTransformToFit(getPhotoTransform(photo.id), fitRatios);
+  drawImageContain(ctx, photo.image, x, y, w, h, background, transform);
 }
 
 function drawImageContain(ctx, image, x, y, w, h, background, transform) {
   const photoTransform = transform || { scale: 1, x: 0, y: 0 };
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
   ctx.fillStyle = background || '#f3f4f6';
   ctx.fillRect(x, y, w, h);
   const scale = Math.min(w / image.naturalWidth, h / image.naturalHeight) * photoTransform.scale;
@@ -2138,6 +2117,7 @@ function drawImageContain(ctx, image, x, y, w, h, background, transform) {
   const dx = x + (w - dw) / 2 + photoTransform.x * w;
   const dy = y + (h - dh) / 2 + photoTransform.y * h;
   ctx.drawImage(image, dx, dy, dw, dh);
+  ctx.restore();
 }
 
 function normalizeSelectedLayout(id) {

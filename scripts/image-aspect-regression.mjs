@@ -31,7 +31,7 @@ try {
   await waitForUpload(page);
   await page.waitForFunction(function () {
     const frame = document.querySelector('.movie-photo.has-photo');
-    return Number(frame?.style.getPropertyValue('--image-contain-height') || 1) < 0.99;
+    return Number(frame?.style.getPropertyValue('--image-fit-height') || 1) < 0.99;
   });
   assert.equal(
     await page.locator('.photo-thumb img').evaluate(function (image) { return getComputedStyle(image).objectFit; }),
@@ -64,7 +64,7 @@ try {
   await waitForUpload(page);
   await page.waitForFunction(function () {
     const frame = document.querySelector('.movie-photo.has-photo');
-    return Number(frame?.style.getPropertyValue('--image-contain-width') || 1) < 0.99;
+    return Number(frame?.style.getPropertyValue('--image-fit-width') || 1) < 0.99;
   });
 
   for (const outputRatio of ['3:4', '4:5', '9:16', '2:3', '1:2']) {
@@ -98,7 +98,7 @@ try {
   await waitForUpload(page);
   await page.waitForFunction(function () {
     const frame = document.querySelector('.movie-photo.has-photo');
-    return Number(frame?.style.getPropertyValue('--image-contain-width') || 1) < 0.99;
+    return Number(frame?.style.getPropertyValue('--image-fit-width') || 1) < 0.99;
   });
   assertContainedGeometry(await readPreviewGeometry(page), 1, 'square preview');
 
@@ -125,7 +125,7 @@ try {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   const switched = await readPreviewGeometry(page);
-  assert.equal(switched.translateX, '0px', 'ratio changes should clamp an unavailable horizontal focus offset');
+  assert.equal(parseFloat(switched.translateX), 0, 'ratio changes should clamp an unavailable horizontal focus offset');
   const switchedDomGrid = await readExportGrid(page, false);
   const switchedCanvasGrid = await readExportGrid(page, true);
   assertPixelGridsNear(
