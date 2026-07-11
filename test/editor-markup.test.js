@@ -52,6 +52,10 @@ test('exposes the required top actions and upload entry point', () => {
   assert.match(html, /id="fileInput"/);
 });
 
+test('file picker explicitly accepts HEIC and HEIF uploads', () => {
+  assert.match(html, /accept="[^"]*\.heic[^"]*\.heif[^"]*\.hif[^"]*image\/heic[^"]*image\/heif[^"]*image\/heic-sequence[^"]*image\/heif-sequence[^"]*"/);
+});
+
 test('keeps the editor chrome free of colorful emoji labels', () => {
   const chrome = [html, appJs].join('\n');
   assert.doesNotMatch(chrome, /[🎛💾📤📐🎨✍️⚙️🎬📋➕🧩]/u);

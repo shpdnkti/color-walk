@@ -2,6 +2,7 @@ import { buildPaletteSummary, findDominantColor, getReadableTextColor } from './
 import { parseDraft, serializeDraft } from './draft.js';
 import { extractPhotoMetadata } from './exif.js';
 import { buildReverseGeocodeUrl, formatReverseGeocodeLabel } from './geocode.js';
+import { buildUploadStatusMessage, isHeicFile, processUploadFiles } from './upload.js';
 import {
   describeColor,
   generateCoverText,
@@ -12,10 +13,22 @@ import {
 const DRAFT_STORAGE_KEY = 'color-walk-draft';
 const GEOCODE_CACHE_KEY = 'color-walk-geocode-cache';
 const DIRECT_NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
-const HEIC_DECODER_MODULE_URL = '/vendor/heic-to/heic-to.js?v=1.5.2';
+const HEIC_DECODER_WORKER_URL = '/src/heic-decoder-worker.js?v=20260710-heic-first-preview';
+const HEIC_WORKER_LOAD_TIMEOUT_MS = 15_000;
+const HEIC_DECODE_TIMEOUT_MS = 60_000;
+const HEIC_COLOR_TIMEOUT_MS = 15_000;
+const UPLOAD_CONCURRENCY = 2;
 let draftSaveTimer = 0;
 let heicDecoderLoadAttempt = 0;
-let heicDecoderModulePromise = null;
+let heicDecoderWorker = null;
+let heicDecoderWorkerReadyPromise = null;
+let heicDecoderWorkerReadyResolve = null;
+let heicDecoderWorkerReadyReject = null;
+let heicDecoderWorkerLoadTimeout = 0;
+let nextHeicDecodeId = 0;
+let heicDecodeRequestQueue = Promise.resolve();
+const heicDecoderPending = new Map();
+const heicDominantColorPending = new Map();
 
 const outputRatioConfig = {
   ratioPresets: [
@@ -41,6 +54,14 @@ const state = {
   paletteOrder: [],
   paletteWeights: {},
   visionInsight: null,
+  activeUploadBatches: 0,
+  pendingPhotoSlots: 0,
+  uploadGeneration: 0,
+  nextUploadBatchId: 0,
+  latestUploadBatchId: 0,
+  draftSavePending: false,
+  nextPhotoUploadOrder: 0,
+  photoUploadOrders: new Map(),
 
   photoTransforms: new Map(),
   imageGesture: {
@@ -136,6 +157,8 @@ async function init() {
 
 function bindEvents() {
   els.fileInput.addEventListener('change', handleFiles);
+  const uploadButton = document.querySelector('label[for="fileInput"]');
+  if (uploadButton) uploadButton.addEventListener('pointerdown', preloadHeicDecoderWorker);
   els.resetButton.addEventListener('click', handleResetUpload);
   els.stashButton.addEventListener('click', stashDraft);
   els.clearDraftButton.addEventListener('click', clearSavedDraft);
@@ -220,26 +243,75 @@ function setEqualMovieRatio() {
 
 
 async function handleFiles(event) {
-  const files = Array.from(event.target.files || []).slice(0, 9 - state.photos.length);
+  const input = event.target;
+  const availableSlots = Math.max(0, 9 - state.photos.length - state.pendingPhotoSlots);
+  const files = Array.from(input.files || []).slice(0, availableSlots);
+  input.value = '';
   if (!files.length) return;
-  els.exportStatus.textContent = '正在识别图片主色和照片信息...';
+  if (!files.some(isHeicFile) && state.activeUploadBatches === 0) releaseIdleHeicDecoderWorker();
+  const generation = state.uploadGeneration;
+  const batchId = ++state.nextUploadBatchId;
+  const uploadOrderStart = state.nextPhotoUploadOrder;
+  state.nextPhotoUploadOrder += files.length;
+  const startedAt = performance.now();
+  const enrichmentQueue = [];
+  let readyCount = 0;
+  let failedCount = 0;
 
+  state.latestUploadBatchId = batchId;
+  state.pendingPhotoSlots += files.length;
+  state.activeUploadBatches += 1;
+  els.exportStatus.textContent = '正在处理 0/' + files.length + ' 张图片...';
   try {
-    const loaded = await Promise.all(files.map(createPhotoItem));
-    state.photos.push(...loaded.filter(Boolean));
-    await hydrateLocationLabels(loaded.filter(Boolean));
-    state.customColor = getMainColorHex() || state.customColor;
-    state.copyDirty = false;
-    seedCoverText();
-    renderAll();
-    els.exportStatus.textContent = '已完成识别，可以继续调整文本和结构。';
-    requestAnimationFrame(function () { fitCanvasToViewport(true); });
-  } catch (error) {
-    els.exportStatus.textContent = files.some(isHeicFile)
-      ? 'HEIC/HEIF 图片读取失败，请重试或转换为 JPG/PNG。'
-      : '图片读取失败，请检查文件格式后再试。';
+    const summary = await processUploadFiles(files, {
+      concurrency: UPLOAD_CONCURRENCY,
+      getPriority: function (file) { return isHeicFile(file) ? 1 : 0; },
+      preparePhoto: createPhotoItem,
+      isCancelled: function () { return generation !== state.uploadGeneration; },
+      onPhotoCancelled: revokePhotoUrl,
+      onPhotoReady: function (photo, file, inputIndex) {
+        readyCount += 1;
+        insertPhotoByUploadOrder(photo, uploadOrderStart + inputIndex);
+        enrichmentQueue.push({ file, photo });
+        state.customColor = getMainColorHex() || state.customColor;
+        if (!state.copyDirty) seedCoverText();
+        renderAll();
+        if (readyCount === 1) {
+          requestAnimationFrame(function () { fitCanvasToViewport(true); });
+        }
+        dispatchPhotoReadyAfterPaint({ batchId, inputIndex, photo, startedAt });
+        if (batchId === state.latestUploadBatchId) {
+          els.exportStatus.textContent = readyCount + ' 张已进入画布，继续处理剩余图片...';
+        }
+      },
+      onPhotoError: function () {
+        failedCount += 1;
+        if (batchId === state.latestUploadBatchId) {
+          els.exportStatus.textContent = readyCount + ' 张已进入画布，' + failedCount + ' 张读取失败，继续处理...';
+        }
+      },
+    });
+
+    if (generation !== state.uploadGeneration) return;
+    if (batchId === state.latestUploadBatchId) {
+      els.exportStatus.textContent = buildUploadStatusMessage(summary);
+    }
+    window.dispatchEvent(new CustomEvent('color-walk:upload-settled', {
+      detail: {
+        batchId,
+        loaded: summary.loaded,
+        failed: summary.failed,
+        cancelled: summary.cancelled,
+        elapsedMs: Math.round(performance.now() - startedAt),
+      },
+    }));
+    scheduleUploadEnrichment(enrichmentQueue, generation);
   } finally {
-    event.target.value = '';
+    state.activeUploadBatches = Math.max(0, state.activeUploadBatches - 1);
+    if (generation === state.uploadGeneration) {
+      state.pendingPhotoSlots = Math.max(0, state.pendingPhotoSlots - files.length);
+    }
+    flushPendingDraftSave();
   }
 }
 
@@ -247,22 +319,96 @@ async function createPhotoItem(file) {
   const loadedImage = await loadPhotoImage(file);
   const dataUrl = loadedImage.dataUrl;
   const image = loadedImage.image;
-  const dominant = extractDominantColor(image) || { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
-  const metadata = await extractPhotoMetadata(file);
-
-  return {
+  const fallbackColor = { r: 160, g: 160, b: 160, hex: '#a0a0a0' };
+  const dominant = loadedImage.dominantColor
+    || (loadedImage.dominantColorPromise ? null : extractDominantColor(image))
+    || fallbackColor;
+  const photo = {
     id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
     fileName: file.name,
-    src: dataUrl,
+    src: loadedImage.src || dataUrl,
     dataUrl,
     image,
     dominantColor: dominant,
     textColor: getReadableTextColor(dominant.hex),
-    metadata,
+    metadata: {},
     naturalWidth: image.naturalWidth,
     naturalHeight: image.naturalHeight,
     ratio: image.naturalWidth / image.naturalHeight,
   };
+
+  if (loadedImage.dominantColorPromise) {
+    hydratePhotoDominantColor(photo, loadedImage.dominantColorPromise);
+  }
+  return photo;
+}
+
+function hydratePhotoDominantColor(photo, dominantColorPromise) {
+  dominantColorPromise.then(function (dominantColor) {
+    if (!dominantColor?.hex) return;
+    photo.dominantColor = dominantColor;
+    photo.textColor = getReadableTextColor(dominantColor.hex);
+    if (!state.photos.some(function (item) { return item.id === photo.id; })) return;
+    state.customColor = getMainColorHex() || state.customColor;
+    if (!state.copyDirty) seedCoverText();
+    renderAll();
+    scheduleDraftSave();
+  }).catch(function () {});
+}
+
+function insertPhotoByUploadOrder(photo, uploadOrder) {
+  state.photoUploadOrders.set(photo.id, uploadOrder);
+  const insertionIndex = state.photos.findIndex(function (existingPhoto) {
+    const existingOrder = state.photoUploadOrders.get(existingPhoto.id);
+    return Number.isFinite(existingOrder) && existingOrder > uploadOrder;
+  });
+  if (insertionIndex === -1) {
+    state.photos.push(photo);
+  } else {
+    state.photos.splice(insertionIndex, 0, photo);
+  }
+}
+
+function dispatchPhotoReadyAfterPaint({ batchId, inputIndex, photo, startedAt }) {
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      if (!state.photos.some(function (item) { return item.id === photo.id; })) return;
+      window.dispatchEvent(new CustomEvent('color-walk:photo-ready', {
+        detail: {
+          batchId,
+          photoId: photo.id,
+          fileName: photo.fileName,
+          inputIndex,
+          elapsedMs: Math.round(performance.now() - startedAt),
+        },
+      }));
+    });
+  });
+}
+
+function scheduleUploadEnrichment(entries, generation) {
+  if (!entries.length) return;
+  setTimeout(async function () {
+    for (const entry of entries) {
+      if (generation !== state.uploadGeneration) return;
+      if (!state.photos.some(function (photo) { return photo.id === entry.photo.id; })) continue;
+      const metadata = await extractPhotoMetadata(entry.file);
+      if (generation !== state.uploadGeneration) return;
+      if (!state.photos.some(function (photo) { return photo.id === entry.photo.id; })) continue;
+      entry.photo.metadata = metadata;
+      if (!state.copyDirty) {
+        seedCoverText();
+        renderPreview();
+      }
+      reverseGeocodePhoto(entry.photo, false);
+      scheduleDraftSave();
+      await yieldToBrowser();
+    }
+  }, 0);
+}
+
+function yieldToBrowser() {
+  return new Promise(function (resolveYield) { setTimeout(resolveYield, 0); });
 }
 
 function extractDominantColor(image) {
@@ -282,11 +428,7 @@ function extractDominantColor(image) {
   });
 }
 
-async function hydrateLocationLabels(photos) {
-  await Promise.all(photos.map(reverseGeocodePhoto));
-}
-
-async function reverseGeocodePhoto(photo) {
+async function reverseGeocodePhoto(photo, showStatus = true) {
   const latitude = photo?.metadata?.latitude;
   const longitude = photo?.metadata?.longitude;
   if (latitude === null || latitude === undefined || longitude === null || longitude === undefined) return;
@@ -315,13 +457,13 @@ async function reverseGeocodePhoto(photo) {
       state.locationCache.set(cacheKey, label);
       cache[cacheKey] = label;
       writeGeocodeCache(cache);
-      applyReverseGeocodeLabel(label, photo, true);
+      applyReverseGeocodeLabel(label, photo, showStatus);
       return;
     } catch (error) {
       // Try the next configured endpoint; the coordinate label remains usable offline.
     }
   }
-  els.exportStatus.textContent = '无法反查地点，请检查网络或稍后重试。';
+  if (showStatus) els.exportStatus.textContent = '无法反查地点，请检查网络或稍后重试。';
 }
 
 function applyReverseGeocodeLabel(label, photo, showStatus) {
@@ -863,6 +1005,7 @@ function renderPhotos() {
     remove.textContent = '×';
     remove.addEventListener('click', function () {
       revokePhotoUrl(photo);
+      state.photoUploadOrders.delete(photo.id);
       state.photoTransforms.delete(photo.id);
       state.photos = state.photos.filter(function (item) { return item.id !== photo.id; });
       state.copyDirty = false;
@@ -1527,8 +1670,19 @@ function clearSavedDraft() {
 
 function scheduleDraftSave() {
   if (state.restoringDraft) return;
+  if (state.activeUploadBatches > 0) {
+    state.draftSavePending = true;
+    return;
+  }
+  state.draftSavePending = false;
   clearTimeout(draftSaveTimer);
   draftSaveTimer = setTimeout(function () { saveDraft(false); }, 250);
+}
+
+function flushPendingDraftSave() {
+  if (state.activeUploadBatches > 0 || !state.draftSavePending) return;
+  state.draftSavePending = false;
+  scheduleDraftSave();
 }
 
 function saveDraft(showStatus) {
@@ -2044,40 +2198,204 @@ function fileToDataUrl(file) {
 }
 
 
-function loadHeicDecoderModule() {
-  if (heicDecoderModulePromise) return heicDecoderModulePromise;
+function releaseIdleHeicDecoderWorker() {
+  if (!heicDecoderPending.size && !heicDominantColorPending.size && heicDecoderWorkerReadyPromise) {
+    resetHeicDecoderWorker(new Error('HEIC decoder is not needed for this upload'));
+  }
+}
 
-  const retryQuery = heicDecoderLoadAttempt ? '&retry=' + heicDecoderLoadAttempt : '';
-  heicDecoderModulePromise = import(HEIC_DECODER_MODULE_URL + retryQuery).catch(function (error) {
-    heicDecoderModulePromise = null;
-    heicDecoderLoadAttempt += 1;
-    throw error;
+function preloadHeicDecoderWorker() {
+  loadHeicDecoderWorker().catch(function () {});
+}
+
+function loadHeicDecoderWorker() {
+  if (heicDecoderWorkerReadyPromise) return heicDecoderWorkerReadyPromise;
+
+  const retryQuery = '&retry=' + heicDecoderLoadAttempt;
+  let resolveReady;
+  let rejectReady;
+  const readyPromise = new Promise(function (resolve, reject) {
+    resolveReady = resolve;
+    rejectReady = reject;
   });
-  return heicDecoderModulePromise;
+  heicDecoderWorkerReadyPromise = readyPromise;
+  heicDecoderWorkerReadyResolve = resolveReady;
+  heicDecoderWorkerReadyReject = rejectReady;
+
+  let worker;
+  try {
+    worker = new Worker(HEIC_DECODER_WORKER_URL + retryQuery, { type: 'module' });
+  } catch (error) {
+    resetHeicDecoderWorker(error);
+    return readyPromise;
+  }
+
+  heicDecoderWorker = worker;
+  worker.onmessage = handleHeicDecoderWorkerMessage;
+  worker.onerror = function (event) {
+    event.preventDefault();
+    resetHeicDecoderWorker(new Error(event.message || 'HEIC decoder worker failed'), worker);
+  };
+  heicDecoderWorkerLoadTimeout = setTimeout(function () {
+    resetHeicDecoderWorker(new Error('HEIC decoder worker load timed out'), worker);
+  }, HEIC_WORKER_LOAD_TIMEOUT_MS);
+  return readyPromise;
+}
+
+function handleHeicDecoderWorkerMessage(event) {
+  const worker = event.currentTarget;
+  if (worker !== heicDecoderWorker) return;
+  const message = event.data || {};
+
+  if (message.type === 'ready') {
+    clearTimeout(heicDecoderWorkerLoadTimeout);
+    heicDecoderWorkerLoadTimeout = 0;
+    const resolveReady = heicDecoderWorkerReadyResolve;
+    heicDecoderWorkerReadyResolve = null;
+    heicDecoderWorkerReadyReject = null;
+    if (resolveReady) resolveReady(worker);
+    return;
+  }
+
+  if (message.type === 'fatal') {
+    resetHeicDecoderWorker(new Error(message.message || 'HEIC decoder module failed'), worker);
+    return;
+  }
+
+  if (message.type === 'dominant-color') {
+    const pendingColor = heicDominantColorPending.get(message.id);
+    if (!pendingColor) return;
+    clearTimeout(pendingColor.timeout);
+    heicDominantColorPending.delete(message.id);
+    pendingColor.resolve(message.dominantColor || null);
+    return;
+  }
+
+  const pending = heicDecoderPending.get(message.id);
+  if (!pending) return;
+  if (message.type === 'decoded') {
+    clearTimeout(pending.timeout);
+    heicDecoderPending.delete(message.id);
+    const colorTimeout = setTimeout(function () {
+      heicDominantColorPending.delete(message.id);
+      pending.resolveDominantColor(null);
+    }, HEIC_COLOR_TIMEOUT_MS);
+    heicDominantColorPending.set(message.id, { resolve: pending.resolveDominantColor, timeout: colorTimeout });
+    pending.resolve({ blob: message.blob, dominantColorPromise: pending.dominantColorPromise });
+    return;
+  }
+  if (message.type === 'decode-error') {
+    clearTimeout(pending.timeout);
+    heicDecoderPending.delete(message.id);
+    pending.resolveDominantColor(null);
+    pending.reject(new Error(message.message || 'HEIC decode failed'));
+  }
+}
+
+function resetHeicDecoderWorker(error, failedWorker = heicDecoderWorker) {
+  if (failedWorker && failedWorker !== heicDecoderWorker) return;
+  const reason = error instanceof Error ? error : new Error(String(error || 'HEIC decoder worker failed'));
+  const worker = heicDecoderWorker;
+  const rejectReady = heicDecoderWorkerReadyReject;
+
+  clearTimeout(heicDecoderWorkerLoadTimeout);
+  heicDecoderWorkerLoadTimeout = 0;
+  if (worker) {
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.terminate();
+  }
+
+  heicDecoderWorker = null;
+  heicDecoderWorkerReadyPromise = null;
+  heicDecoderWorkerReadyResolve = null;
+  heicDecoderWorkerReadyReject = null;
+  heicDecoderLoadAttempt += 1;
+  if (rejectReady) rejectReady(reason);
+  for (const pending of heicDecoderPending.values()) {
+    clearTimeout(pending.timeout);
+    pending.resolveDominantColor(null);
+    pending.reject(reason);
+  }
+  heicDecoderPending.clear();
+  for (const pendingColor of heicDominantColorPending.values()) {
+    clearTimeout(pendingColor.timeout);
+    pendingColor.resolve(null);
+  }
+  heicDominantColorPending.clear();
+}
+
+function convertHeicInWorker(file, readyWorker) {
+  const decodePromise = heicDecodeRequestQueue.then(
+    function () { return postHeicDecodeRequest(file, readyWorker); },
+    function () { return postHeicDecodeRequest(file, readyWorker); }
+  );
+  heicDecodeRequestQueue = decodePromise.catch(function () {});
+  return decodePromise;
+}
+
+async function postHeicDecodeRequest(file, readyWorker) {
+  let worker = readyWorker;
+  if (!worker || worker !== heicDecoderWorker) {
+    worker = await loadHeicDecoderWorker();
+  }
+  const id = 'heic-' + Date.now() + '-' + (++nextHeicDecodeId);
+
+  let resolveDominantColor;
+  const dominantColorPromise = new Promise(function (resolveColor) {
+    resolveDominantColor = resolveColor;
+  });
+
+  return new Promise(function (resolve, reject) {
+    const timeout = setTimeout(function () {
+      resetHeicDecoderWorker(new Error('HEIC decode timed out'), worker);
+    }, HEIC_DECODE_TIMEOUT_MS);
+    heicDecoderPending.set(id, { resolve, reject, timeout, dominantColorPromise, resolveDominantColor });
+    try {
+      worker.postMessage({ type: 'decode', id, file });
+    } catch (error) {
+      resetHeicDecoderWorker(error, worker);
+    }
+  });
 }
 
 async function loadPhotoImage(file) {
-  const originalDataUrl = await fileToDataUrl(file);
-  try {
-    return { dataUrl: originalDataUrl, image: await loadImage(originalDataUrl) };
-  } catch (error) {
-    if (!isHeicFile(file)) throw error;
+  if (isHeicFile(file)) {
+    return loadHeicPhotoImage(file);
   }
 
-  const module = await loadHeicDecoderModule();
-  const converted = await module.heicTo({
-    blob: file,
-    type: 'image/jpeg',
-    quality: 0.9,
-  });
-  const dataUrl = await fileToDataUrl(converted);
-  return { dataUrl, image: await loadImage(dataUrl) };
+  const originalDataUrl = await fileToDataUrl(file);
+  return { src: originalDataUrl, dataUrl: originalDataUrl, image: await loadImage(originalDataUrl) };
 }
 
-function isHeicFile(file) {
-  const type = String(file?.type || '').toLowerCase();
-  const name = String(file?.name || '').toLowerCase();
-  return type === 'image/heic' || type === 'image/heif' || /\.(heic|heif)$/.test(name);
+async function loadHeicPhotoImage(file) {
+  const decoderResultPromise = loadHeicDecoderWorker().then(
+    function (worker) { return { worker }; },
+    function (error) { return { error }; }
+  );
+  const nativeUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(nativeUrl);
+    const dataUrl = await fileToDataUrl(file);
+    return { src: nativeUrl, dataUrl, image };
+  } catch (error) {
+    URL.revokeObjectURL(nativeUrl);
+  }
+
+  const decoderResult = await decoderResultPromise;
+  if (decoderResult.error) throw decoderResult.error;
+  const converted = await convertHeicInWorker(file, decoderResult.worker);
+  const src = URL.createObjectURL(converted.blob);
+  try {
+    const [dataUrl, image] = await Promise.all([
+      fileToDataUrl(converted.blob),
+      loadImage(src),
+    ]);
+    return { src, dataUrl, image, dominantColorPromise: converted.dominantColorPromise };
+  } catch (error) {
+    URL.revokeObjectURL(src);
+    throw error;
+  }
 }
 
 function loadImage(src) {
@@ -2096,6 +2414,13 @@ function handleResetUpload() {
 }
 
 function resetApp() {
+  state.uploadGeneration += 1;
+  if (heicDecoderPending.size > 0 || heicDominantColorPending.size > 0) {
+    resetHeicDecoderWorker(new Error('upload cancelled'));
+  }
+  state.pendingPhotoSlots = 0;
+  state.nextPhotoUploadOrder = 0;
+  state.photoUploadOrders.clear();
   state.photos.forEach(revokePhotoUrl);
   localStorage.removeItem(DRAFT_STORAGE_KEY);
   state.photos = [];
@@ -2128,6 +2453,9 @@ function resetApp() {
   applyCanvasViewport();
   seedCoverText(true);
   renderAll();
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = 0;
+  state.draftSavePending = false;
   els.exportStatus.textContent = '画布已重置。';
 }
 

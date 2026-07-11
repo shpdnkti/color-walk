@@ -7,7 +7,7 @@ import { normalizeCoordinate, formatReverseGeocodeLabel } from './src/geocode.js
 import { buildVisionRequest, parseVisionResponse } from './server/vision.js';
 
 const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url));
-const HEIC_TO_BROWSER_MODULE_PATH = join(ROOT_DIR, 'node_modules', 'heic-to', 'dist', 'csp', 'heic-to.js');
+const HEIC_TO_BROWSER_MODULE_PATH = join(ROOT_DIR, 'node_modules', 'heic-to', 'dist', 'next', 'heic-to.js');
 const PORT = Number(process.env.PORT || 3000);
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
