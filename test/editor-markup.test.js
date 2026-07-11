@@ -213,6 +213,9 @@ test('exposes discoverable per-photo crop controls from the palette photo cards'
   assert.match(appJs, /className = 'photo-crop-controls'/);
   assert.match(appJs, /className = 'photo-crop-button'/);
   assert.match(appJs, /className = 'photo-crop-slider'/);
+  assert.match(appJs, /slider\.min = String\(Math\.round\(\(PHOTO_SCALE_MIN - 1\) \* 100\)\)/);
+  assert.match(appJs, /setPhotoCropScale\(photo\.id, 1 \+ Number\(slider\.value\) \/ 100\)/);
+  assert.match(appJs, /function formatPhotoCropPercent/);
   assert.match(appJs, /data-crop-action/);
   assert.match(appJs, /aria-label', '调整 .* 裁切缩放/);
   assert.match(appJs, /createPhotoCropButton\(photo, 'reset'[\s\S]*?'重置 ' \+ photo\.fileName \+ ' 裁切'/);
