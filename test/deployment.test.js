@@ -137,6 +137,8 @@ test('documents opt-in browser regression checks', async () => {
 test('CI gates HEIC delivery on strict-CSP browser and performance regressions', async () => {
   const workflow = await readProjectFile('.github/workflows/wechat-miniprogram.yml');
 
+  assert.match(workflow, /docker build --tag color-walk:ci \./);
+  assert.match(workflow, /test ! -e \/app\/node_modules\/heic-to/);
   assert.match(workflow, /npm run test:heic-worker/);
   assert.match(workflow, /npm run test:heic-upload/);
   assert.match(workflow, /npm run test:heic-progressive/);

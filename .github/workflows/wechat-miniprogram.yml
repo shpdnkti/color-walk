@@ -32,6 +32,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Build production image
+        run: docker build --tag color-walk:ci .
+      - name: Verify retired HEIC decoder is absent from production
+        run: docker run --rm --entrypoint sh color-walk:ci -c 'test ! -e /app/node_modules/heic-to'
       - run: npx playwright install --with-deps chromium
       - run: npm test
       - name: Verify HEIC worker failure semantics

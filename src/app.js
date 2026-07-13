@@ -2366,22 +2366,8 @@ async function loadPhotoImage(file) {
 }
 
 async function loadHeicPhotoImage(file) {
-  const decoderResultPromise = loadHeicDecoderWorker().then(
-    function (worker) { return { worker }; },
-    function (error) { return { error }; }
-  );
-  const nativeUrl = URL.createObjectURL(file);
-  try {
-    const image = await loadImage(nativeUrl);
-    const dataUrl = await fileToDataUrl(file);
-    return { src: nativeUrl, dataUrl, image };
-  } catch (error) {
-    URL.revokeObjectURL(nativeUrl);
-  }
-
-  const decoderResult = await decoderResultPromise;
-  if (decoderResult.error) throw decoderResult.error;
-  const converted = await convertHeicInWorker(file, decoderResult.worker);
+  const worker = await loadHeicDecoderWorker();
+  const converted = await convertHeicInWorker(file, worker);
   const src = URL.createObjectURL(converted.blob);
   try {
     const [dataUrl, image] = await Promise.all([

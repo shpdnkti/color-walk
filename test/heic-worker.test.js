@@ -11,6 +11,8 @@ const workerSource = readFileSync(resolve(testDir, '../src/heic-decoder-worker.j
 test('runs HEIC conversion through a persistent module worker', () => {
   assert.match(appSource, /const HEIC_DECODER_WORKER_URL = '\/src\/heic-decoder-worker\.js'/);
   assert.match(appSource, /new Worker\(HEIC_DECODER_WORKER_URL, \{ type: 'module' \}\)/);
+  assert.doesNotMatch(appSource, /URL\.createObjectURL\(file\)/);
+  assert.doesNotMatch(appSource, /fileToDataUrl\(file\)[\s\S]{0,120}return \{ src: nativeUrl/);
   assert.doesNotMatch(appSource, /heicDecoderLoadAttempt|retryQuery/);
   assert.match(appSource, /function convertHeicInWorker/);
   assert.match(appSource, /worker\.postMessage\(\{ type: 'decode', id, file \}\)/);
@@ -53,15 +55,14 @@ test('recreates the decoder worker after fatal, runtime, load-timeout, and item-
   assert.match(appSource, /message\.type === 'decode-error'/);
 });
 
-test('preloads the decoder silently from upload intent without forcing conversion', () => {
+test('preloads the decoder silently and routes HEIC files through the selected decoder', () => {
   assert.match(appSource, /document\.querySelector\('label\[for="fileInput"\]'\)/);
   assert.match(appSource, /uploadButton.*pointerdown.*preloadHeicDecoderWorker/);
   assert.doesNotMatch(appSource, /pointerenter|addEventListener.*focus.*preloadHeicDecoderWorker/);
   assert.match(appSource, /function releaseIdleHeicDecoderWorker/);
   assert.match(appSource, /function preloadHeicDecoderWorker/);
-  assert.match(appSource, /const nativeUrl = URL\.createObjectURL\(file\)/);
-  assert.match(appSource, /await loadImage\(nativeUrl\)/);
-  assert.match(appSource, /convertHeicInWorker\(file/);
+  assert.match(appSource, /const worker = await loadHeicDecoderWorker\(\)/);
+  assert.match(appSource, /convertHeicInWorker\(file, worker\)/);
 });
 
 test('cancels active decoder work while preserving an idle warm worker', () => {
