@@ -452,10 +452,14 @@ async function reverseGeocodePhoto(photo, showStatus = true) {
   }
 
   const endpoints = getReverseGeocodeEndpoints(latitude, longitude);
+  let requestId = '';
   for (const endpoint of endpoints) {
     try {
       const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
-      if (!response.ok) continue;
+      if (!response.ok) {
+        requestId ||= getResponseRequestId(response);
+        continue;
+      }
       const data = await response.json();
       const label = data.label || formatReverseGeocodeLabel(data);
       if (!label) continue;
@@ -468,7 +472,9 @@ async function reverseGeocodePhoto(photo, showStatus = true) {
       // Try the next configured endpoint; the coordinate label remains usable offline.
     }
   }
-  if (showStatus) els.exportStatus.textContent = '无法反查地点，请检查网络或稍后重试。';
+  if (showStatus) {
+    els.exportStatus.textContent = '无法反查地点，请检查网络或稍后重试。' + formatRequestIdSuffix(requestId);
+  }
 }
 
 function applyReverseGeocodeLabel(label, photo, showStatus) {
@@ -562,7 +568,9 @@ async function analyzePhotosWithAI(fallbackToGenerated) {
     const payload = await response.json().catch(function () { return {}; });
     if (!response.ok) {
       const reason = payload.code || payload.error || 'analyze_failed';
-      throw new Error(reason);
+      const error = new Error(reason);
+      error.requestId = getResponseRequestId(response);
+      throw error;
     }
 
     applyVisionInsight(payload.insight || {});
@@ -573,7 +581,7 @@ async function analyzePhotosWithAI(fallbackToGenerated) {
       seedCoverText(true);
       renderPreview();
       scheduleDraftSave();
-      els.exportStatus.textContent = '已生成基础封面文字，AI 识图暂不可用。';
+      els.exportStatus.textContent = '已生成基础封面文字，AI 识图暂不可用。' + formatRequestIdSuffix(error?.requestId);
     } else {
       els.exportStatus.textContent = getAiErrorMessage(error);
     }
@@ -583,9 +591,23 @@ async function analyzePhotosWithAI(fallbackToGenerated) {
 }
 
 function getAiErrorMessage(error) {
-  if (error?.message === 'openai_api_key_missing') return 'AI 识图暂时不可用：缺少 OpenAI API Key。';
-  if (error?.message === 'insufficient_quota') return 'AI 识图暂时不可用：OpenAI 额度不足。';
-  return 'AI 识图失败，请稍后再试或继续手动输入。';
+  let message = 'AI 识图失败，请稍后再试或继续手动输入。';
+  if (error?.message === 'openai_api_key_missing') message = 'AI 识图暂时不可用：缺少 OpenAI API Key。';
+  if (error?.message === 'insufficient_quota') message = 'AI 识图暂时不可用：OpenAI 额度不足。';
+  return message + formatRequestIdSuffix(error?.requestId);
+}
+
+function getResponseRequestId(response) {
+  return safeRequestId(response?.headers?.get?.('x-request-id'));
+}
+
+function formatRequestIdSuffix(value) {
+  const requestId = safeRequestId(value);
+  return requestId ? '（请求编号：' + requestId + '）' : '';
+}
+
+function safeRequestId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : '';
 }
 
 function applyVisionInsight(insight) {

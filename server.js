@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,8 @@ const MAX_OPENAI_REQUEST_TIMEOUT_MS = 2147483647;
 const DEFAULT_GEOCODE_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 const DEFAULT_GEOCODE_REFERER = 'https://github.com/shpdnkti/color-walk';
 const DEFAULT_GEOCODE_USER_AGENT = 'ColorWalk/0.1 (' + DEFAULT_GEOCODE_REFERER + ')';
+const REQUEST_LOG_CONTEXT = Symbol('requestLogContext');
+const API_ROUTES = new Set(['/api/analyze-image', '/api/reverse-geocode']);
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval'",
@@ -36,6 +39,7 @@ export function createColorWalkServer() {
   return http.createServer(async function (request, response) {
     try {
       const url = new URL(request.url || '/', 'http://127.0.0.1');
+      startRequestLog(request, response, url.pathname);
 
       if (request.method === 'POST' && url.pathname === '/api/analyze-image') {
         await handleAnalyzeImage(request, response);
@@ -54,6 +58,7 @@ export function createColorWalkServer() {
 
       sendJson(response, 405, { error: 'method_not_allowed' });
     } catch (error) {
+      captureUnexpectedError(response, error);
       sendJson(response, 500, { error: 'server_error' });
     }
   });
@@ -62,7 +67,12 @@ export function createColorWalkServer() {
 if (isMainModule()) {
   const server = createColorWalkServer();
   server.listen(PORT, '0.0.0.0', function () {
-    console.log('Color Walk server listening on http://127.0.0.1:' + PORT);
+    writeStructuredLog({
+      level: 'info',
+      event: 'server_started',
+      host: '0.0.0.0',
+      port: PORT,
+    });
   });
 }
 
@@ -92,19 +102,26 @@ async function handleAnalyzeImage(request, response) {
   });
   const openAIConfig = getOpenAIConfig();
 
-  const upstream = await fetch(openAIConfig.responsesUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(visionRequest),
-    signal: AbortSignal.timeout(openAIConfig.timeoutMs),
-  });
+  const upstreamStartedAt = Date.now();
+  let upstream;
+  try {
+    upstream = await fetch(openAIConfig.responsesUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(visionRequest),
+      signal: AbortSignal.timeout(openAIConfig.timeoutMs),
+    });
+  } finally {
+    captureUpstream(response, 'openai', upstream?.status, upstreamStartedAt);
+  }
 
   if (!upstream.ok) {
     const errorPayload = await upstream.json().catch(function () { return {}; });
     const upstreamError = errorPayload.error || {};
+    captureUpstreamErrorCode(response, upstreamError.code || upstreamError.type);
     sendJson(response, upstream.status === 429 ? 503 : 502, {
       error: 'openai_request_failed',
       status: upstream.status,
@@ -141,6 +158,7 @@ async function handleReverseGeocode(url, response) {
 
   let upstream;
   let data;
+  const upstreamStartedAt = Date.now();
   try {
     upstream = await fetch(upstreamUrl, {
       headers: {
@@ -149,6 +167,7 @@ async function handleReverseGeocode(url, response) {
         Referer: DEFAULT_GEOCODE_REFERER,
       },
     });
+    captureUpstream(response, 'nominatim', upstream.status, upstreamStartedAt);
 
     if (!upstream.ok) {
       sendJson(response, 502, { error: 'reverse_geocode_failed', status: upstream.status });
@@ -157,6 +176,7 @@ async function handleReverseGeocode(url, response) {
 
     data = await upstream.json();
   } catch (error) {
+    if (!upstream) captureUpstream(response, 'nominatim', null, upstreamStartedAt);
     sendJson(response, 502, { error: 'reverse_geocode_unavailable' });
     return;
   }
@@ -267,7 +287,74 @@ function safeErrorCode(value) {
   return typeof value === 'string' && /^[a-z0-9_.-]+$/i.test(value) ? value : '';
 }
 
+function startRequestLog(request, response, route) {
+  if (!API_ROUTES.has(route)) return;
+
+  const requestId = safeRequestId(request.headers['x-request-id']) || randomUUID();
+  const context = {
+    startedAt: Date.now(),
+    requestId,
+    method: request.method || '',
+    route,
+  };
+  response[REQUEST_LOG_CONTEXT] = context;
+  response.setHeader('X-Request-ID', requestId);
+  response.once('finish', function () {
+    const status = response.statusCode;
+    writeStructuredLog({
+      level: status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info',
+      event: 'request_completed',
+      requestId: context.requestId,
+      method: context.method,
+      route: context.route,
+      status,
+      durationMs: Date.now() - context.startedAt,
+      ...(context.errorCode ? { errorCode: context.errorCode } : {}),
+      ...(context.errorType ? { errorType: context.errorType } : {}),
+      ...(context.stack ? { stack: context.stack } : {}),
+      ...(context.upstream ? { upstream: context.upstream } : {}),
+    });
+  });
+}
+
+function safeRequestId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : '';
+}
+
+function captureUnexpectedError(response, error) {
+  const context = response[REQUEST_LOG_CONTEXT];
+  if (!context) return;
+  context.errorType = typeof error?.name === 'string' ? error.name : 'Error';
+  if (typeof error?.stack === 'string') {
+    context.stack = error.stack.split('\n').slice(1).map(function (line) { return line.trim(); }).filter(Boolean).join('\n');
+  }
+}
+
+function captureUpstream(response, service, status, startedAt) {
+  const context = response[REQUEST_LOG_CONTEXT];
+  if (!context) return;
+  context.upstream = {
+    service,
+    status: Number.isInteger(status) ? status : null,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+function captureUpstreamErrorCode(response, value) {
+  const errorCode = safeErrorCode(value);
+  const upstream = response[REQUEST_LOG_CONTEXT]?.upstream;
+  if (upstream && errorCode) upstream.errorCode = errorCode;
+}
+
+function writeStructuredLog(entry) {
+  const line = JSON.stringify({ timestamp: new Date().toISOString(), ...entry });
+  if (entry.level === 'info') console.log(line);
+  else console.error(line);
+}
+
 function sendJson(response, status, payload) {
+  const context = response[REQUEST_LOG_CONTEXT];
+  if (context) context.errorCode = safeErrorCode(payload?.error);
   const body = JSON.stringify(payload);
   response.writeHead(status, {
     ...securityHeaders(),

@@ -151,14 +151,19 @@ Page({
     const url = buildReverseGeocodeUrl(config.apiBaseUrl + '/api/reverse-geocode', latitude, longitude);
     try {
       const response = await wxRequest({ url, method: 'GET' });
+      const requestId = getResponseRequestId(response);
       const label = response.data?.label || formatReverseGeocodeLabel(response.data || {});
-      if (!label) throw new Error('empty_label');
+      if (response.statusCode < 200 || response.statusCode >= 300 || !label) {
+        const error = new Error('reverse_geocode_failed');
+        error.requestId = requestId;
+        throw error;
+      }
       cache[cacheKey] = label;
       wx.setStorageSync(GEOCODE_CACHE_KEY, cache);
       this.applyReverseGeocodeLabel(label);
       this.setStatus('已反查地点：' + label + '。');
     } catch (error) {
-      this.setStatus('无法反查地点，请检查网络或稍后重试。');
+      this.setStatus('无法反查地点，请检查网络或稍后重试。' + formatRequestIdSuffix(error?.requestId));
     }
   },
 
@@ -204,7 +209,9 @@ Page({
         },
       });
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw new Error(response.data?.code || response.data?.error || 'analyze_failed');
+        const error = new Error(response.data?.code || response.data?.error || 'analyze_failed');
+        error.requestId = getResponseRequestId(response);
+        throw error;
       }
       this.applyVisionInsight(response.data?.insight || {});
     } catch (error) {
@@ -1055,10 +1062,26 @@ function getTouchDistance(touches) {
 }
 
 function getAiErrorMessage(error) {
-  if (error?.message === 'openai_api_key_missing') return 'AI 识图暂时不可用：缺少 OpenAI API Key。';
-  if (error?.message === 'insufficient_quota') return 'AI 识图暂时不可用：OpenAI 额度不足。';
-  if (error?.message === 'unsupported_image_type') return 'AI 识图暂不支持 HEIC/HEIF，请先转换为 JPG 或 PNG 后再试。';
-  return 'AI 识图失败，请稍后再试或继续手动输入关键词。';
+  let message = 'AI 识图失败，请稍后再试或继续手动输入关键词。';
+  if (error?.message === 'openai_api_key_missing') message = 'AI 识图暂时不可用：缺少 OpenAI API Key。';
+  if (error?.message === 'insufficient_quota') message = 'AI 识图暂时不可用：OpenAI 额度不足。';
+  if (error?.message === 'unsupported_image_type') message = 'AI 识图暂不支持 HEIC/HEIF，请先转换为 JPG 或 PNG 后再试。';
+  return message + formatRequestIdSuffix(error?.requestId);
+}
+
+function getResponseRequestId(response) {
+  const headers = response?.header || {};
+  const key = Object.keys(headers).find(function (name) { return name.toLowerCase() === 'x-request-id'; });
+  return safeRequestId(key ? headers[key] : '');
+}
+
+function formatRequestIdSuffix(value) {
+  const requestId = safeRequestId(value);
+  return requestId ? '（请求编号：' + requestId + '）' : '';
+}
+
+function safeRequestId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : '';
 }
 
 function getExportErrorMessage(error) {
