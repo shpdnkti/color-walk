@@ -2,9 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  assertColdMedianWithinLimit,
   assertComparableBenchmarkReports,
   getBaselineColdMedian,
 } from '../scripts/heic-benchmark-report.mjs';
+
+test('enforces the selected cold first-editable preview limit', () => {
+  assert.doesNotThrow(function () { assertColdMedianWithinLimit({ medianFirstEditableMs: 1499.9 }, 1500); });
+  assert.throws(
+    function () { assertColdMedianWithinLimit({ medianFirstEditableMs: 1500.1 }, 1500); },
+    /1500\.1ms exceeded 1500ms/
+  );
+});
 
 function makeReport() {
   return {

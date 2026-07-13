@@ -71,7 +71,8 @@ test('preview compose serves the live source tree from a separate yaml', async (
   assert.match(compose, /- "\$\{PREVIEW_PORT:-5173\}:80"/);
   assert.match(compose, /- \.\/index\.html:\/usr\/share\/nginx\/html\/index\.html:ro/);
   assert.match(compose, /- \.\/src:\/usr\/share\/nginx\/html\/src:ro/);
-  assert.match(compose, /node_modules\/heic-to\/dist\/next:\/usr\/share\/nginx\/html\/vendor\/heic-to:ro/);
+  assert.match(compose, /node_modules\/libheif-js\/libheif-wasm:\/usr\/share\/nginx\/html\/vendor\/libheif:ro/);
+  assert.doesNotMatch(compose, /heic-to/);
   assert.match(compose, /- \.\/nginx\.conf:\/etc\/nginx\/conf\.d\/default\.conf:ro/);
   assert.match(compose, /- \.\/nginx\.preview\.conf:\/etc\/nginx\/nginx\.conf:ro/);
 });
@@ -83,14 +84,32 @@ test('preview nginx main config lets the container read private bind-mounted wor
   assert.match(nginx, /include \/etc\/nginx\/conf\.d\/\*\.conf;/);
 });
 
-test('nginx configuration supports browser module assets and single-page fallback', async () => {
+test('nginx configuration enforces the production CSP and supports browser module assets', async () => {
   const nginx = await readProjectFile('nginx.conf');
 
   assert.match(nginx, /listen 80;/);
   assert.match(nginx, /root \/usr\/share\/nginx\/html;/);
   assert.match(nginx, /try_files \$uri \$uri\/ \/index\.html;/);
-  assert.match(nginx, /location ~\* \\\.\(js\|css\|png\|jpg\|jpeg\|gif\|svg\|ico\|webp\)\$/);
+  assert.match(nginx, /location ~\* \\\.\(js\|mjs\)\$/);
+  assert.match(nginx, /location ~\* \\\.\(css\|png\|jpg\|jpeg\|gif\|svg\|ico\|webp\)\$/);
+  assert.match(nginx, /add_header Cache-Control "no-cache";/);
   assert.match(nginx, /add_header Cache-Control "public, max-age=604800, immutable";/);
+  assert.match(nginx, /Content-Security-Policy/);
+  assert.match(nginx, /script-src 'self' 'wasm-unsafe-eval'/);
+  assert.match(nginx, /worker-src 'self'/);
+  assert.doesNotMatch(nginx, /(?:^|\s)'unsafe-eval'(?:\s|;|$)/m);
+});
+
+test('production dependency uses libheif directly without the retired decoder wrapper', async () => {
+  const packageJson = JSON.parse(await readProjectFile('package.json'));
+  const packageLock = await readProjectFile('package-lock.json');
+  const dockerfile = await readProjectFile('Dockerfile');
+
+  assert.equal(packageJson.dependencies['libheif-js'], '1.19.8');
+  assert.equal(packageJson.dependencies['heic-to'], undefined);
+  assert.match(packageLock, /node_modules\/libheif-js/);
+  assert.doesNotMatch(packageLock, /heic-to/);
+  assert.match(dockerfile, /npm ci --omit=dev/);
 });
 
 test('documents opt-in browser regression checks', async () => {
@@ -113,4 +132,25 @@ test('documents opt-in browser regression checks', async () => {
   assert.match(readme, /npm run test:image-aspect/);
   assert.match(readme, /npm run test:image-crop-drag/);
   assert.match(readme, /npm run bench:heic-first-preview/);
+});
+
+test('CI gates HEIC delivery on strict-CSP browser and performance regressions', async () => {
+  const workflow = await readProjectFile('.github/workflows/wechat-miniprogram.yml');
+
+  assert.match(workflow, /npm run test:heic-worker/);
+  assert.match(workflow, /npm run test:heic-upload/);
+  assert.match(workflow, /npm run test:heic-progressive/);
+  assert.match(workflow, /npm run test:image-aspect/);
+  assert.match(workflow, /COLOR_WALK_HEIC_RUNS=3 npm run bench:heic-first-preview/);
+});
+
+test('documents HEIC CSP requirements, production verification, and failure signals', async () => {
+  const readme = await readProjectFile('README.md');
+
+  assert.match(readme, /script-src 'self' 'wasm-unsafe-eval'/);
+  assert.match(readme, /不得加入 `'unsafe-eval'`/);
+  assert.match(readme, /npm run test:heic-upload/);
+  assert.match(readme, /securitypolicyviolation/);
+  assert.match(readme, /Worker `fatal`/);
+  assert.match(readme, /\/vendor\/libheif\/libheif-bundle\.mjs/);
 });

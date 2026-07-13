@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { chromium } from 'playwright';
 
-import { createColorWalkServer } from '../server.js';
-
+const appRoot = resolve(process.env.COLOR_WALK_HEIC_APP_ROOT || '.');
+const { createColorWalkServer } = await import(pathToFileURL(resolve(appRoot, 'server.js')).href);
 const app = createColorWalkServer();
 const port = await listenOnLocalhost(app);
 let browser;
@@ -103,7 +104,7 @@ try {
   assertContainedGeometry(await readPreviewGeometry(page), 1, 'square preview');
 
   await page.locator('.photo-crop-slider').evaluate(function (input) {
-    input.value = '200';
+    input.value = '100';
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.waitForFunction(function () {
@@ -125,7 +126,12 @@ try {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   const switched = await readPreviewGeometry(page);
-  assert.equal(parseFloat(switched.translateX), 0, 'ratio changes should clamp an unavailable horizontal focus offset');
+  const switchedXBound = Math.abs(switched.fitWidth * Number(switched.scale) - 1) / 2;
+  const switchedXBoundPercent = switchedXBound / switched.fitWidth * 100;
+  assert.ok(
+    Math.abs(Math.abs(parseFloat(switched.translateX)) - switchedXBoundPercent) < 0.01,
+    'ratio changes should clamp horizontal focus to the new contained-whitespace bound'
+  );
   const switchedDomGrid = await readExportGrid(page, false);
   const switchedCanvasGrid = await readExportGrid(page, true);
   assertPixelGridsNear(
@@ -141,7 +147,10 @@ try {
   const savedTransform = await page.evaluate(function () {
     return JSON.parse(localStorage.getItem('color-walk-draft')).photos[0].transform;
   });
-  assert.equal(savedTransform.x, 0, 'draft state should store the transform clamped for the current ratio');
+  assert.ok(
+    Math.abs(savedTransform.x - switchedXBound) < 0.0001,
+    'draft state should store the transform clamped for the current ratio'
+  );
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(function () {
     return document.querySelector('#exportStatus')?.textContent === '已恢复上次草稿。'
@@ -157,7 +166,7 @@ try {
   assert.ok(Math.abs(restored.imageRatio - 1) < 0.02, 'draft restore must preserve the square ratio');
 
   await resetEditor(page);
-  const sourceHeic = readFileSync(resolve('test/fixtures/upload.heic'));
+  const sourceHeic = readFileSync(resolve(appRoot, 'test/fixtures/upload.heic'));
   await page.setInputFiles('#fileInput', {
     name: 'orientation-source.heic',
     mimeType: 'image/heic',
@@ -241,6 +250,7 @@ function readPreviewGeometry(page) {
       scale: frame.style.getPropertyValue('--image-scale').trim(),
       translateX: frame.style.getPropertyValue('--image-translate-x').trim(),
       translateY: frame.style.getPropertyValue('--image-translate-y').trim(),
+      fitWidth: Number(frame.style.getPropertyValue('--image-fit-width') || 1),
       imageRatio: imageRect.width / imageRect.height,
       frameLeft: frameRect.left,
       frameRight: frameRect.right,

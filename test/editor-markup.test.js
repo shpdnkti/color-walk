@@ -252,9 +252,7 @@ test('shows live numeric values for the font size slider', () => {
   assert.match(html, /id="fontSizeValue"/);
   assert.match(html, /src="src\/app\.js\?v=[^"]+"/);
   assert.match(html, /id="fontSizeInput"[^>]+data-range-output="#fontSizeValue"[^>]+data-range-unit="px"/);
-  assert.match(html, /function bindRangeValueOutputs\(\)/);
-  assert.match(html, /addEventListener\('input', sync\)/);
-  assert.match(html, /addEventListener\('change', sync\)/);
+  assert.doesNotMatch(html, /<script(?:\s[^>]*)?>\s*\(function/);
   assert.match(appJs, /fontSizeValue: document\.querySelector\('#fontSizeValue'\)/);
   assert.match(appJs, /function syncRangeValueOutputs\(\)/);
   assert.match(appJs, /function handleStyleRangeInput/);

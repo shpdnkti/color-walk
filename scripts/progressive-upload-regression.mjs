@@ -55,7 +55,7 @@ try {
     });
   });
 
-  await page.route('**/vendor/heic-to/heic-to.js*', async function (route) {
+  await page.route('**/vendor/libheif/libheif-bundle.mjs*', async function (route) {
     decoderRequests += 1;
     if (decoderRequests === 1) {
       firstDecoderRequestSeen.resolve();

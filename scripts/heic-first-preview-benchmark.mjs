@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
 import {
+  assertColdMedianWithinLimit,
   assertComparableBenchmarkReports,
   getBaselineColdMedian,
   readBaselineReport,
@@ -30,6 +31,7 @@ const pointerdownDelayMs = nonNegativeInteger(process.env.COLOR_WALK_HEIC_POINTE
 const requiredReduction = Number(process.env.COLOR_WALK_HEIC_REQUIRED_REDUCTION || 0.3);
 const maxFrameGapMs = positiveInteger(process.env.COLOR_WALK_HEIC_MAX_FRAME_GAP_MS, 150);
 const maxLongTaskMs = positiveInteger(process.env.COLOR_WALK_HEIC_MAX_LONG_TASK_MS, 150);
+const maxColdMedianMs = positiveInteger(process.env.COLOR_WALK_HEIC_MAX_COLD_MEDIAN_MS, 1500);
 
 if (!existsSync(fixturePath)) {
   console.error('HEIC performance fixture not found: ' + fixturePath);
@@ -115,7 +117,7 @@ const report = {
     chromium: browserVersion,
     viewport: { width: 1024, height: 900, deviceScaleFactor: 1 },
   },
-  config: { runCount, timeoutMs, pointerdownDelayMs, maxFrameGapMs, maxLongTaskMs },
+  config: { runCount, timeoutMs, pointerdownDelayMs, maxFrameGapMs, maxLongTaskMs, maxColdMedianMs },
   cold,
   warm,
   comparison,
@@ -129,6 +131,7 @@ process.stdout.write(serialized);
 
 assertResponsiveness(cold, 'Cold-cache');
 assertResponsiveness(warm, 'Warm-cache');
+assertColdMedianWithinLimit(cold, maxColdMedianMs);
 
 if (comparison) {
   assert.ok(
@@ -144,7 +147,7 @@ async function createBenchmarkPage(browser, serverPort, clearBrowserCache) {
   const session = { context, page, decoderRequests: 0 };
 
   page.on('request', function (request) {
-    if (request.url().includes('/vendor/heic-to/')) session.decoderRequests += 1;
+    if (request.url().includes('/vendor/libheif/')) session.decoderRequests += 1;
   });
   await page.route('**/api/reverse-geocode**', function (route) {
     return route.fulfill({
@@ -193,7 +196,7 @@ async function measureUpload(session, buffer) {
     window.__colorWalkHeicBenchmark.stopped = true;
     const probe = window.__colorWalkHeicBenchmark;
     const resources = performance.getEntriesByType('resource')
-      .filter(function (entry) { return entry.name.includes('/vendor/heic-to/'); })
+      .filter(function (entry) { return entry.name.includes('/vendor/libheif/'); })
       .map(function (entry) {
         return {
           name: entry.name.replace(location.origin, ''),

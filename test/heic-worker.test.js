@@ -9,13 +9,18 @@ const appSource = readFileSync(resolve(testDir, '../src/app.js'), 'utf8');
 const workerSource = readFileSync(resolve(testDir, '../src/heic-decoder-worker.js'), 'utf8');
 
 test('runs HEIC conversion through a persistent module worker', () => {
-  assert.match(appSource, /const HEIC_DECODER_WORKER_URL = '\/src\/heic-decoder-worker\.js\?v=20260710-heic-first-preview'/);
-  assert.match(appSource, /new Worker\(HEIC_DECODER_WORKER_URL \+ retryQuery, \{ type: 'module' \}\)/);
+  assert.match(appSource, /const HEIC_DECODER_WORKER_URL = '\/src\/heic-decoder-worker\.js'/);
+  assert.match(appSource, /new Worker\(HEIC_DECODER_WORKER_URL, \{ type: 'module' \}\)/);
+  assert.doesNotMatch(appSource, /heicDecoderLoadAttempt|retryQuery/);
   assert.match(appSource, /function convertHeicInWorker/);
   assert.match(appSource, /worker\.postMessage\(\{ type: 'decode', id, file \}\)/);
   assert.doesNotMatch(appSource, /import\(HEIC_DECODER_MODULE_URL/);
-  assert.match(workerSource, /decoderUrl\.searchParams\.set\('retry', retry\)/);
+  assert.match(workerSource, /new URL\('\/vendor\/libheif\/libheif-bundle\.mjs'/);
   assert.match(workerSource, /import\(decoderUrl\.href\)/);
+  assert.match(workerSource, /await decoderModule\.default\(\)/);
+  assert.match(workerSource, /new libheif\.HeifDecoder\(\)/);
+  assert.match(workerSource, /new OffscreenCanvas/);
+  assert.match(workerSource, /convertToBlob/);
   assert.match(workerSource, /type: 'ready'/);
   assert.match(workerSource, /type: 'fatal'/);
   assert.match(workerSource, /type: 'image\/jpeg'/);
@@ -23,7 +28,7 @@ test('runs HEIC conversion through a persistent module worker', () => {
   assert.match(workerSource, /type: 'decode-error'/);
   assert.match(workerSource, /decodeQueue = decodeQueue\.then/);
   assert.match(workerSource, /HEIC_DECODER_WARMUP_BASE64/);
-  assert.match(workerSource, /quality: 0\.5/);
+  assert.match(workerSource, /decodeHeicToJpeg\(decoder, new Blob\(\[bytes\].*0\.5\)/);
   const warmupIndex = workerSource.indexOf('await warmUpHeicDecoder');
   const readyIndex = workerSource.indexOf("type: 'ready'");
   assert.ok(warmupIndex >= 0 && warmupIndex < readyIndex);
@@ -38,8 +43,8 @@ test('serializes app decode requests before starting each item timeout', () => {
 
 test('recreates the decoder worker after fatal, runtime, load-timeout, and item-timeout failures', () => {
   assert.match(appSource, /resetHeicDecoderWorker/);
-  assert.match(appSource, /heicDecoderLoadAttempt \+= 1/);
   assert.match(appSource, /heicDecoderWorkerReadyPromise = null/);
+  assert.match(appSource, /worker\.terminate\(\)/);
   assert.match(appSource, /HEIC_WORKER_LOAD_TIMEOUT_MS/);
   assert.match(appSource, /HEIC_DECODE_TIMEOUT_MS/);
   assert.match(appSource, /message\.type === 'fatal'/);

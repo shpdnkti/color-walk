@@ -24,7 +24,7 @@ try {
   page.on('pageerror', function (error) {
     pageErrors.push(String(error?.message || error));
   });
-  await page.route('**/vendor/heic-to/heic-to.js*', async function (route) {
+  await page.route('**/vendor/libheif/libheif-bundle.mjs*', async function (route) {
     if (delayDecoder) await delay(750);
     await route.continue();
   });
@@ -70,7 +70,8 @@ try {
 
   await page.waitForFunction(function () {
     return window.__photoReadyEvents.length === 1
-      && document.querySelectorAll('.photo-card').length === 1;
+      && document.querySelectorAll('.photo-card').length === 1
+      && Number.isFinite(window.__uploadInteractionDelay);
   }, null, { timeout: 500 });
   assert.equal(await page.locator('.photo-card').count(), 1);
   assert.equal(await page.inputValue('#coverTextInput'), '用户输入保留');

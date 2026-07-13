@@ -7,7 +7,7 @@ import { normalizeCoordinate, formatReverseGeocodeLabel } from './src/geocode.js
 import { buildVisionRequest, parseVisionResponse } from './server/vision.js';
 
 const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url));
-const HEIC_TO_BROWSER_MODULE_PATH = join(ROOT_DIR, 'node_modules', 'heic-to', 'dist', 'next', 'heic-to.js');
+const LIBHEIF_BROWSER_MODULE_PATH = join(ROOT_DIR, 'node_modules', 'libheif-js', 'libheif-wasm', 'libheif-bundle.mjs');
 const PORT = Number(process.env.PORT || 3000);
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -17,6 +17,17 @@ const MAX_OPENAI_REQUEST_TIMEOUT_MS = 2147483647;
 const DEFAULT_GEOCODE_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 const DEFAULT_GEOCODE_REFERER = 'https://github.com/shpdnkti/color-walk';
 const DEFAULT_GEOCODE_USER_AGENT = 'ColorWalk/0.1 (' + DEFAULT_GEOCODE_REFERER + ')';
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "worker-src 'self'",
+  "connect-src 'self' blob: https://nominatim.openstreetmap.org",
+  "img-src 'self' blob: data:",
+  "style-src 'self' 'unsafe-inline'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
 
 loadEnvFile('.env.local');
 loadEnvFile('.env');
@@ -167,9 +178,10 @@ function serveStatic(pathname, method, response) {
 
   const stats = statSync(filePath);
   response.writeHead(200, {
+    ...securityHeaders(),
     'Content-Type': contentType(filePath),
     'Content-Length': stats.size,
-    'Cache-Control': filePath.endsWith('index.html') ? 'no-cache' : 'public, max-age=604800, immutable',
+    'Cache-Control': staticCacheControl(filePath),
   });
 
   if (method === 'HEAD') {
@@ -180,6 +192,13 @@ function serveStatic(pathname, method, response) {
   createReadStream(filePath).pipe(response);
 }
 
+function staticCacheControl(filePath) {
+  const extension = extname(filePath).toLowerCase();
+  return ['.html', '.js', '.mjs'].includes(extension)
+    ? 'no-cache'
+    : 'public, max-age=604800, immutable';
+}
+
 function resolveStaticPath(pathname) {
   const decoded = decodeURIComponent(pathname.split('?')[0] || '/');
   let relativePath = decoded === '/' ? '/index.html' : decoded;
@@ -187,9 +206,10 @@ function resolveStaticPath(pathname) {
     return '';
   }
 
-  if (relativePath === '/vendor/heic-to/heic-to.js') {
-    return existsSync(HEIC_TO_BROWSER_MODULE_PATH) ? HEIC_TO_BROWSER_MODULE_PATH : '';
+  if (relativePath === '/vendor/libheif/libheif-bundle.mjs') {
+    return existsSync(LIBHEIF_BROWSER_MODULE_PATH) ? LIBHEIF_BROWSER_MODULE_PATH : '';
   }
+  if (relativePath.startsWith('/vendor/')) return '';
 
   const allowed = relativePath === '/index.html' || relativePath.startsWith('/src/');
   if (!allowed) relativePath = '/index.html';
@@ -250,6 +270,7 @@ function safeErrorCode(value) {
 function sendJson(response, status, payload) {
   const body = JSON.stringify(payload);
   response.writeHead(status, {
+    ...securityHeaders(),
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
   });
@@ -258,10 +279,18 @@ function sendJson(response, status, payload) {
 
 function sendText(response, status, body) {
   response.writeHead(status, {
+    ...securityHeaders(),
     'Content-Type': 'text/plain; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
   });
   response.end(body);
+}
+
+function securityHeaders() {
+  return {
+    'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+    'X-Content-Type-Options': 'nosniff',
+  };
 }
 
 
@@ -369,6 +398,7 @@ function contentType(filePath) {
   const types = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
     '.css': 'text/css; charset=utf-8',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',

@@ -39,6 +39,15 @@ export function getBaselineColdMedian(report, source = 'baseline report') {
   return value;
 }
 
+export function assertColdMedianWithinLimit(summary, limitMs) {
+  const medianMs = Number(summary?.medianFirstEditableMs);
+  assert.ok(Number.isFinite(medianMs) && medianMs > 0, 'Cold benchmark must contain a positive first-editable median');
+  assert.ok(
+    medianMs <= limitMs,
+    'Cold first-editable median ' + medianMs + 'ms exceeded ' + limitMs + 'ms'
+  );
+}
+
 export function assertComparableBenchmarkReports(baseline, candidate) {
   for (const path of COMPARABLE_PATHS) {
     assert.deepEqual(

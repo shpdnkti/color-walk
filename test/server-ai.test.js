@@ -8,19 +8,25 @@ import { createColorWalkServer } from '../server.js';
 
 const runHeicBrowserTests = process.env.COLOR_WALK_RUN_HEIC_BROWSER === '1';
 
-test('serves the pinned worker-safe HEIC browser decoder module', async (t) => {
+test('serves the pinned strict-CSP HEIC browser decoder module', async (t) => {
   const app = createColorWalkServer();
   const appPort = await listenOnLocalhost(app);
   t.after(async function () { await closeServer(app); });
 
-  const response = await fetch('http://127.0.0.1:' + appPort + '/vendor/heic-to/heic-to.js');
+  const response = await fetch('http://127.0.0.1:' + appPort + '/vendor/libheif/libheif-bundle.mjs');
   const source = await response.text();
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') || '', /text\/javascript/);
   assert.ok(source.length > 1_000_000);
-  assert.equal(source.includes('new OffscreenCanvas'), true, 'decoder module should use OffscreenCanvas');
-  assert.equal(source.includes('convertToBlob'), true, 'decoder module should encode inside a worker');
+  assert.match(source, /WebAssembly/);
+  assert.doesNotMatch(source, /\beval\s*\(|new Function\s*\(/);
+  assert.equal(response.headers.get('cache-control'), 'no-cache');
+  assert.match(response.headers.get('content-security-policy') || '', /script-src 'self' 'wasm-unsafe-eval'/);
+  assert.doesNotMatch(response.headers.get('content-security-policy') || '', /(?:^|\s)'unsafe-eval'(?:\s|;|$)/);
+
+  const retiredResponse = await fetch('http://127.0.0.1:' + appPort + '/vendor/heic-to/heic-to.js');
+  assert.equal(retiredResponse.status, 404);
 });
 
 test('HEIC decoder worker warms before readiness and isolates serial decode failures', { skip: !runHeicBrowserTests }, async (t) => {
@@ -33,7 +39,7 @@ test('HEIC decoder worker warms before readiness and isolates serial decode fail
 
   const page = await browser.newPage();
   const decoderRequests = [];
-  await page.route('**/vendor/heic-to/heic-to.js*', async function (route) {
+  await page.route('**/vendor/libheif/libheif-bundle.mjs*', async function (route) {
     decoderRequests.push(route.request().url());
     await route.fulfill({
       status: 200,
@@ -41,19 +47,33 @@ test('HEIC decoder worker warms before readiness and isolates serial decode fail
       body: [
         'let active = false;',
         'let warmed = false;',
-        'export async function heicTo({ blob, type, quality }) {',
-        "  if (active) throw new Error('decode overlap');",
-        '  active = true;',
-        '  try {',
-        "    if (quality === 0.5) { await new Promise((resolve) => setTimeout(resolve, 50)); warmed = true; return new Blob(['warm'], { type }); }",
-        "    if (!warmed) throw new Error('decoder used before warmup');",
-        "    if (blob.name === 'slow.heic') await new Promise((resolve) => setTimeout(resolve, 50));",
-        "    if (blob.name === 'broken.heic') throw new Error('broken fixture');",
-        "    return new Blob([blob.name + ':' + type + ':' + quality], { type });",
-        '  } finally {',
-        '    active = false;',
+        'class FakeImage {',
+        '  constructor(name) { this.name = name; }',
+        '  is_primary() { return true; }',
+        '  get_width() { return 1; }',
+        '  get_height() { return 1; }',
+        '  display(imageData, callback) {',
+        '    active = true;',
+        "    const delay = this.name === 'slow' || this.name === 'warmup' ? 50 : 0;",
+        '    setTimeout(() => {',
+        '      active = false;',
+        "      if (this.name === 'warmup') warmed = true;",
+        '      imageData.data.set([120, 80, 40, 255]);',
+        '      callback(imageData);',
+        '    }, delay);',
+        '  }',
+        '  free() {}',
+        '}',
+        'class HeifDecoder {',
+        '  decode(buffer) {',
+        "    if (active) throw new Error('decode overlap');",
+        "    const name = buffer.length > 20 ? 'warmup' : new TextDecoder().decode(buffer);",
+        "    if (name !== 'warmup' && !warmed) throw new Error('decoder used before warmup');",
+        "    if (name === 'broken') throw new Error('broken fixture');",
+        '    return [new FakeImage(name)];',
         '  }',
         '}',
+        'export default async function () { return { HeifDecoder }; }',
       ].join('\n'),
     });
   });
@@ -99,7 +119,6 @@ test('HEIC decoder worker warms before readiness and isolates serial decode fail
             id: result.id,
             message: result.message || '',
             blobType: result.blob?.type || '',
-            blobText: result.blob ? await result.blob.text() : '',
           };
         })));
       };
@@ -107,14 +126,14 @@ test('HEIC decoder worker warms before readiness and isolates serial decode fail
   });
 
   assert.deepEqual(probe, [
-    { type: 'decoded', id: 'slow', message: '', blobType: 'image/jpeg', blobText: 'slow.heic:image/jpeg:0.9' },
-    { type: 'decode-error', id: 'broken', message: 'broken fixture', blobType: '', blobText: '' },
-    { type: 'decoded', id: 'after-error', message: '', blobType: 'image/jpeg', blobText: 'after.heic:image/jpeg:0.9' },
+    { type: 'decoded', id: 'slow', message: '', blobType: 'image/jpeg' },
+    { type: 'decode-error', id: 'broken', message: 'broken fixture', blobType: '' },
+    { type: 'decoded', id: 'after-error', message: '', blobType: 'image/jpeg' },
   ]);
   assert.equal(decoderRequests.length, 1);
   const decoderUrl = new URL(decoderRequests[0]);
-  assert.equal(decoderUrl.searchParams.get('v'), '1.5.2');
-  assert.equal(decoderUrl.searchParams.get('retry'), 'worker-test');
+  assert.equal(decoderUrl.pathname, '/vendor/libheif/libheif-bundle.mjs');
+  assert.equal(decoderUrl.search, '');
 });
 
 test('HEIC decoder worker reports decoder module load failures as fatal messages', { skip: !runHeicBrowserTests }, async (t) => {
@@ -126,7 +145,7 @@ test('HEIC decoder worker reports decoder module load failures as fatal messages
   t.after(async function () { await browser.close(); });
 
   const page = await browser.newPage();
-  await page.route('**/vendor/heic-to/heic-to.js*', function (route) {
+  await page.route('**/vendor/libheif/libheif-bundle.mjs*', function (route) {
     return route.fulfill({ status: 503, contentType: 'text/plain', body: 'decoder unavailable' });
   });
   await page.goto('http://127.0.0.1:' + appPort + '/', { waitUntil: 'domcontentloaded' });
@@ -164,11 +183,11 @@ test('HEIC decoder worker reports warmup failures as fatal messages', { skip: !r
   t.after(async function () { await browser.close(); });
 
   const page = await browser.newPage();
-  await page.route('**/vendor/heic-to/heic-to.js*', function (route) {
+  await page.route('**/vendor/libheif/libheif-bundle.mjs*', function (route) {
     return route.fulfill({
       status: 200,
       contentType: 'text/javascript',
-      body: "export async function heicTo() { throw new Error('warmup failed'); }",
+      body: "export default async function () { return { HeifDecoder: class { decode() { throw new Error('warmup failed'); } } }; }",
     });
   });
   await page.goto('http://127.0.0.1:' + appPort + '/', { waitUntil: 'domcontentloaded' });

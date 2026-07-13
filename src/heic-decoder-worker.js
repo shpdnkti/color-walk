@@ -1,10 +1,7 @@
 import { findDominantColor } from './color.js';
 
 const workerUrl = new URL(self.location.href);
-const retry = workerUrl.searchParams.get('retry') || '';
-const decoderUrl = new URL('/vendor/heic-to/heic-to.js', workerUrl.origin);
-decoderUrl.searchParams.set('v', '1.5.2');
-decoderUrl.searchParams.set('retry', retry);
+const decoderUrl = new URL('/vendor/libheif/libheif-bundle.mjs', workerUrl.origin);
 const DOMINANT_COLOR_SAMPLE_SIZE = 72;
 const HEIC_DECODER_WARMUP_BASE64 = 'AAAAHGZ0eXBoZWljAAAAAG1pZjFoZWljbWlhZgAAAVZtZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAAA5waXRtAAAAAAABAAAAImlsb2MAAAAAREAAAQABAAAAAAF6AAEAAAAAAAAALgAAACNpaW5mAAAAAAABAAAAFWluZmUCAAAAAAEAAGh2YzEAAAAA1mlwcnAAAAC3aXBjbwAAAHhodmNDAQNwAAAAAAAAAAAAHvAA/P34+AAADwMgAAEAGEABDAH//wNwAAADAJAAAAMAAAMAHroCQCEAAQArQgEBA3AAAAMAkAAAAwAAAwAeoDCBJZbqSSmubgIaDAgAAAMACAAAAwAIQCIAAQAHRAHBcrAiQAAAABRpc3BlAAAAAAAAAGAAAABIAAAAE2NvbHJuY2x4AAEADQAGgAAAABBwaXhpAAAAAAMICAgAAAAXaXBtYQAAAAAAAAABAAEEgQIDBAAAADZtZGF0AAAAKigBrwT4QTJpy/4u////IkfZf044pPRxgz4KU26eESXbQxvdeAAAAwA/YA==';
 
@@ -13,27 +10,24 @@ const decoderReady = loadDecoder();
 async function loadDecoder() {
   try {
     const decoderModule = await import(decoderUrl.href);
-    await warmUpHeicDecoder(decoderModule);
+    const libheif = await decoderModule.default();
+    const decoder = new libheif.HeifDecoder();
+    await warmUpHeicDecoder(decoder);
     self.postMessage({ type: 'ready' });
-    return decoderModule;
+    return decoder;
   } catch (error) {
     self.postMessage({ type: 'fatal', message: getErrorMessage(error) });
     return null;
   }
 }
 
-async function warmUpHeicDecoder(decoderModule) {
+async function warmUpHeicDecoder(decoder) {
   const binary = atob(HEIC_DECODER_WARMUP_BASE64);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
   }
-  const blob = new Blob([bytes], { type: 'image/heic' });
-  await decoderModule.heicTo({
-    blob,
-    type: 'image/jpeg',
-    quality: 0.5,
-  });
+  await decodeHeicToJpeg(decoder, new Blob([bytes], { type: 'image/heic' }), 0.5);
 }
 
 let decodeQueue = Promise.resolve();
@@ -48,15 +42,11 @@ self.onmessage = function (event) {
 };
 
 async function decodeFile(message) {
-  const decoderModule = await decoderReady;
-  if (!decoderModule) return;
+  const decoder = await decoderReady;
+  if (!decoder) return;
 
   try {
-    const blob = await decoderModule.heicTo({
-      blob: message.file,
-      type: 'image/jpeg',
-      quality: 0.9,
-    });
+    const blob = await decodeHeicToJpeg(decoder, message.file, 0.9);
     self.postMessage({ type: 'decoded', id: message.id, blob });
     let dominantColor = null;
     try {
@@ -67,6 +57,41 @@ async function decodeFile(message) {
     self.postMessage({ type: 'dominant-color', id: message.id, dominantColor });
   } catch (error) {
     self.postMessage({ type: 'decode-error', id: message.id, message: getErrorMessage(error) });
+  }
+}
+
+async function decodeHeicToJpeg(decoder, blob, quality) {
+  const images = decoder.decode(new Uint8Array(await blob.arrayBuffer()));
+  if (!images.length) throw new Error('HEIC file contains no decodable image');
+  let canvas;
+  try {
+    const image = images[0];
+    const width = image.get_width();
+    const height = image.get_height();
+    if (!width || !height) throw new Error('HEIC image has invalid dimensions');
+
+    canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('HEIC decoder canvas is unavailable');
+    const imageData = context.createImageData(width, height);
+    for (let index = 3; index < imageData.data.length; index += 4) imageData.data[index] = 255;
+    await new Promise(function (resolveDisplay, rejectDisplay) {
+      image.display(imageData, function (displayData) {
+        if (!displayData) {
+          rejectDisplay(new Error('HEIC image decode failed'));
+          return;
+        }
+        resolveDisplay();
+      });
+    });
+    context.putImageData(imageData, 0, 0);
+    return await canvas.convertToBlob({ type: 'image/jpeg', quality });
+  } finally {
+    images.forEach(function (decodedImage) { decodedImage.free(); });
+    if (canvas) {
+      canvas.width = 1;
+      canvas.height = 1;
+    }
   }
 }
 

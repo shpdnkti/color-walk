@@ -8,6 +8,6 @@ services:
     volumes:
       - ./index.html:/usr/share/nginx/html/index.html:ro
       - ./src:/usr/share/nginx/html/src:ro
-      - ./node_modules/heic-to/dist/next:/usr/share/nginx/html/vendor/heic-to:ro
+      - ./node_modules/libheif-js/libheif-wasm:/usr/share/nginx/html/vendor/libheif:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx.preview.conf:/etc/nginx/nginx.conf:ro

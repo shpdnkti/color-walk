@@ -26,6 +26,7 @@ try {
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1024, height: 900 }, deviceScaleFactor: 1 });
   const pageErrors = [];
+  const consoleErrors = [];
   let reportPageError;
   const firstPageError = new Promise(function (resolveError) {
     reportPageError = resolveError;
@@ -36,8 +37,37 @@ try {
     pageErrors.push(message);
     reportPageError({ kind: 'pageerror', message });
   });
+  page.on('console', function (message) {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  await page.addInitScript(function () {
+    window.__colorWalkCspViolations = [];
+    window.__colorWalkWorkerSignals = [];
+    document.addEventListener('securitypolicyviolation', function (event) {
+      window.__colorWalkCspViolations.push({
+        directive: event.effectiveDirective,
+        blockedUri: event.blockedURI,
+      });
+    });
+    const NativeWorker = window.Worker;
+    window.Worker = new Proxy(NativeWorker, {
+      construct(Target, args) {
+        const worker = new Target(...args);
+        worker.addEventListener('message', function (event) {
+          const message = event.data || {};
+          if (message.type === 'fatal' || message.type === 'decode-error') {
+            window.__colorWalkWorkerSignals.push(message);
+          }
+        });
+        worker.addEventListener('error', function (event) {
+          window.__colorWalkWorkerSignals.push({ type: 'worker-error', message: event.message || '' });
+        });
+        return worker;
+      },
+    });
+  });
   let decoderRequests = 0;
-  await page.route('**/vendor/heic-to/heic-to.js*', function (route) {
+  await page.route('**/vendor/libheif/libheif-bundle.mjs*', function (route) {
     decoderRequests += 1;
     if (failFirstDecoderRequest && decoderRequests === 1) return route.abort('failed');
     return route.continue();
@@ -50,7 +80,10 @@ try {
     });
   });
 
-  await page.goto('http://127.0.0.1:' + port + '/', { waitUntil: 'domcontentloaded' });
+  const navigationResponse = await page.goto('http://127.0.0.1:' + port + '/', { waitUntil: 'domcontentloaded' });
+  const csp = navigationResponse?.headers()['content-security-policy'] || '';
+  assert.match(csp, /script-src 'self' 'wasm-unsafe-eval'/);
+  assert.doesNotMatch(csp, /(?:^|\s)'unsafe-eval'(?:\s|;|$)/);
   await page.evaluate(function () { localStorage.clear(); });
   await page.reload({ waitUntil: 'domcontentloaded' });
 
@@ -79,6 +112,15 @@ try {
   assert.equal(injectedFile.type, fixtureMimeType);
 
   const outcome = await Promise.race([completed, firstPageError]);
+  const outcomeProbe = await page.evaluate(function () {
+    return {
+      status: document.querySelector('#exportStatus')?.textContent || '',
+      photoCards: document.querySelectorAll('.photo-card').length,
+      cspViolations: window.__colorWalkCspViolations || [],
+      workerSignals: window.__colorWalkWorkerSignals || [],
+    };
+  });
+  assert.equal(outcome.kind, 'completed', JSON.stringify({ outcome, outcomeProbe, pageErrors, consoleErrors }, null, 2));
   if (usesDefaultFixture) {
     await page.waitForFunction(function () {
       return document.querySelector('#coverTextInput')?.value.includes('2024.01.02');
@@ -96,6 +138,8 @@ try {
       sourcePrefix: String(image?.src || '').slice(0, 32),
       sourceMimeType: sourceResponse?.headers.get('content-type') || '',
       coverText: document.querySelector('#coverTextInput')?.value || '',
+      cspViolations: window.__colorWalkCspViolations || [],
+      workerSignals: window.__colorWalkWorkerSignals || [],
     };
   });
 
@@ -103,6 +147,14 @@ try {
   assert.equal(probe.photoCards, 1);
   assert.equal(probe.previewImages, 1);
   assert.deepEqual(pageErrors, []);
+  assert.deepEqual(consoleErrors, []);
+  assert.deepEqual(probe.cspViolations, []);
+  if (failFirstDecoderRequest) {
+    assert.equal(probe.workerSignals.length, 1);
+    assert.equal(probe.workerSignals[0].type, 'fatal');
+  } else {
+    assert.deepEqual(probe.workerSignals, []);
+  }
   assert.equal(decoderRequests, failFirstDecoderRequest ? 2 : 1);
   assert.match(probe.sourcePrefix, /^(blob:|data:image\/jpeg;base64,)/);
   assert.equal(probe.sourceMimeType, 'image/jpeg');

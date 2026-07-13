@@ -34,6 +34,16 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm test
+      - name: Verify HEIC worker failure semantics
+        run: npm run test:heic-worker
+      - name: Verify strict-CSP HEIC upload and export
+        run: npm run test:heic-upload
+      - name: Verify progressive mixed-file uploads
+        run: npm run test:heic-progressive
+      - name: Verify HEIC orientation and export geometry
+        run: npm run test:image-aspect
+      - name: Gate first editable HEIC preview
+        run: COLOR_WALK_HEIC_RUNS=3 npm run bench:heic-first-preview
       - run: npm run miniprogram:validate
 
   deploy:

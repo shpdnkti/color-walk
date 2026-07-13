@@ -19,13 +19,12 @@ import {
 const DRAFT_STORAGE_KEY = 'color-walk-draft';
 const GEOCODE_CACHE_KEY = 'color-walk-geocode-cache';
 const DIRECT_NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
-const HEIC_DECODER_WORKER_URL = '/src/heic-decoder-worker.js?v=20260710-heic-first-preview';
+const HEIC_DECODER_WORKER_URL = '/src/heic-decoder-worker.js';
 const HEIC_WORKER_LOAD_TIMEOUT_MS = 15_000;
 const HEIC_DECODE_TIMEOUT_MS = 60_000;
 const HEIC_COLOR_TIMEOUT_MS = 15_000;
 const UPLOAD_CONCURRENCY = 2;
 let draftSaveTimer = 0;
-let heicDecoderLoadAttempt = 0;
 let heicDecoderWorker = null;
 let heicDecoderWorkerReadyPromise = null;
 let heicDecoderWorkerReadyResolve = null;
@@ -2211,7 +2210,6 @@ function preloadHeicDecoderWorker() {
 function loadHeicDecoderWorker() {
   if (heicDecoderWorkerReadyPromise) return heicDecoderWorkerReadyPromise;
 
-  const retryQuery = '&retry=' + heicDecoderLoadAttempt;
   let resolveReady;
   let rejectReady;
   const readyPromise = new Promise(function (resolve, reject) {
@@ -2224,7 +2222,7 @@ function loadHeicDecoderWorker() {
 
   let worker;
   try {
-    worker = new Worker(HEIC_DECODER_WORKER_URL + retryQuery, { type: 'module' });
+    worker = new Worker(HEIC_DECODER_WORKER_URL, { type: 'module' });
   } catch (error) {
     resetHeicDecoderWorker(error);
     return readyPromise;
@@ -2310,7 +2308,6 @@ function resetHeicDecoderWorker(error, failedWorker = heicDecoderWorker) {
   heicDecoderWorkerReadyPromise = null;
   heicDecoderWorkerReadyResolve = null;
   heicDecoderWorkerReadyReject = null;
-  heicDecoderLoadAttempt += 1;
   if (rejectReady) rejectReady(reason);
   for (const pending of heicDecoderPending.values()) {
     clearTimeout(pending.timeout);
