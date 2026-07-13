@@ -1837,6 +1837,7 @@ async function drawPreviewDomToCanvas(ctx, width, height) {
 
 function clonePreviewForExport(width, height) {
   const clone = els.previewCanvas.cloneNode(true);
+  inlinePreviewImageSourcesForExport(clone);
   clone.style.width = width + 'px';
   clone.style.height = height + 'px';
   clone.style.maxWidth = 'none';
@@ -1845,6 +1846,14 @@ function clonePreviewForExport(width, height) {
   clone.style.transform = 'none';
   copyPreviewExportVars(clone);
   return clone;
+}
+
+function inlinePreviewImageSourcesForExport(clone) {
+  clone.querySelectorAll('.preview-image[data-photo-id] img[src^="blob:"]').forEach(function (image) {
+    const photoId = image.closest('.preview-image')?.dataset.photoId;
+    const photo = state.photos.find(function (item) { return item.id === photoId; });
+    if (photo?.dataUrl) image.src = photo.dataUrl;
+  });
 }
 
 function copyPreviewExportVars(target) {
