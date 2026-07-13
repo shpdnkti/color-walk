@@ -113,11 +113,75 @@ try {
     assert.equal(probe.naturalHeight, 72);
     assert.match(probe.coverText, /2024\.01\.02/);
   }
+  await assertHeicExportKeepsImageCorners(page);
 
-  console.log('PASS HEIC upload regression: the selected image is decoded and rendered.');
+  console.log('PASS HEIC upload regression: the selected image is decoded, rendered, and exported.');
 } finally {
   if (browser) await browser.close();
   await closeServer(app);
+}
+
+async function assertHeicExportKeepsImageCorners(page) {
+  await page.waitForFunction(function () {
+    const image = document.querySelector('.movie-photo.has-photo img');
+    return image?.naturalWidth > 0 && image?.naturalHeight > 0;
+  });
+  await page.evaluate(function () {
+    return new Promise(function (resolveFrame) {
+      requestAnimationFrame(function () { requestAnimationFrame(resolveFrame); });
+    });
+  });
+
+  const sourceProbe = await page.evaluate(function () {
+    const preview = document.querySelector('#previewCanvas').getBoundingClientRect();
+    const image = document.querySelector('.movie-photo.has-photo img');
+    const imageRect = image.getBoundingClientRect();
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = image.naturalWidth;
+    sourceCanvas.height = image.naturalHeight;
+    const context = sourceCanvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    const ratios = [
+      [0.15, 0.15],
+      [0.85, 0.15],
+      [0.15, 0.85],
+      [0.85, 0.85],
+    ];
+    return ratios.map(function ([xRatio, yRatio]) {
+      return {
+        exportX: (imageRect.left - preview.left + imageRect.width * xRatio) / preview.width,
+        exportY: (imageRect.top - preview.top + imageRect.height * yRatio) / preview.height,
+        source: Array.from(context.getImageData(
+          Math.round((sourceCanvas.width - 1) * xRatio),
+          Math.round((sourceCanvas.height - 1) * yRatio),
+          1,
+          1
+        ).data.slice(0, 3)),
+      };
+    });
+  });
+
+  await page.click('#exportButton');
+  await page.waitForFunction(function () {
+    return document.querySelector('#exportStatus')?.textContent === '已导出 PNG。';
+  });
+  const exported = await page.evaluate(function (points) {
+    const canvas = document.querySelector('#exportCanvas');
+    const context = canvas.getContext('2d');
+    return points.map(function (point) {
+      const x = Math.min(canvas.width - 1, Math.max(0, Math.round(point.exportX * canvas.width)));
+      const y = Math.min(canvas.height - 1, Math.max(0, Math.round(point.exportY * canvas.height)));
+      return Array.from(context.getImageData(x, y, 1, 1).data.slice(0, 3));
+    });
+  }, sourceProbe);
+
+  sourceProbe.forEach(function (point, index) {
+    assert.ok(point.source.every(function (value, channel) {
+      return Math.abs(value - exported[index][channel]) <= 24;
+    }), 'HEIC export should retain source corner ' + index
+      + ': source=' + point.source.join(',')
+      + ', exported=' + exported[index].join(','));
+  });
 }
 
 async function uploadFixture(page, buffer, mimeType, lastModified) {
