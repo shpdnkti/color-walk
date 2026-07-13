@@ -9,7 +9,7 @@ const appSource = readFileSync(resolve(testDir, '../src/app.js'), 'utf8');
 const workerSource = readFileSync(resolve(testDir, '../src/heic-decoder-worker.js'), 'utf8');
 
 test('runs HEIC conversion through a persistent module worker', () => {
-  assert.match(appSource, /const HEIC_DECODER_WORKER_URL = '\/src\/heic-decoder-worker\.js'/);
+  assert.match(appSource, /const HEIC_DECODER_WORKER_URL = '\/src\/heic-decoder-worker\.js\?v=20260714-libheif'/);
   assert.match(appSource, /new Worker\(HEIC_DECODER_WORKER_URL, \{ type: 'module' \}\)/);
   assert.doesNotMatch(appSource, /URL\.createObjectURL\(file\)/);
   assert.doesNotMatch(appSource, /fileToDataUrl\(file\)[\s\S]{0,120}return \{ src: nativeUrl/);

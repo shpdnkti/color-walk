@@ -29,6 +29,27 @@ test('serves the pinned strict-CSP HEIC browser decoder module', async (t) => {
   assert.equal(retiredResponse.status, 404);
 });
 
+test('versions the public HEIC worker URL so deployments bypass stale edge caches', async (t) => {
+  const app = createColorWalkServer();
+  const appPort = await listenOnLocalhost(app);
+  t.after(async function () { await closeServer(app); });
+
+  const origin = 'http://127.0.0.1:' + appPort;
+  const indexSource = await fetch(origin + '/').then(function (response) { return response.text(); });
+  const appAsset = indexSource.match(/<script type="module" src="([^"]+)"/)?.[1] || '';
+  assert.equal(appAsset, 'src/app.js?v=20260714-worker-cache');
+
+  const appSource = await fetch(new URL(appAsset, origin + '/')).then(function (response) { return response.text(); });
+  const workerAsset = appSource.match(/const HEIC_DECODER_WORKER_URL = '([^']+)'/)?.[1] || '';
+  assert.match(workerAsset, /^\/src\/heic-decoder-worker\.js\?v=20260714-libheif$/);
+
+  const workerResponse = await fetch(new URL(workerAsset, origin));
+  const workerSource = await workerResponse.text();
+  assert.equal(workerResponse.status, 200);
+  assert.match(workerSource, /\/vendor\/libheif\/libheif-bundle\.mjs/);
+  assert.doesNotMatch(workerSource, /heic-to/);
+});
+
 test('HEIC decoder worker warms before readiness and isolates serial decode failures', { skip: !runHeicBrowserTests }, async (t) => {
   const app = createColorWalkServer();
   const appPort = await listenOnLocalhost(app);

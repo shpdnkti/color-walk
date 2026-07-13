@@ -19,7 +19,7 @@ import {
 const DRAFT_STORAGE_KEY = 'color-walk-draft';
 const GEOCODE_CACHE_KEY = 'color-walk-geocode-cache';
 const DIRECT_NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
-const HEIC_DECODER_WORKER_URL = '/src/heic-decoder-worker.js';
+const HEIC_DECODER_WORKER_URL = '/src/heic-decoder-worker.js?v=20260714-libheif';
 const HEIC_WORKER_LOAD_TIMEOUT_MS = 15_000;
 const HEIC_DECODE_TIMEOUT_MS = 60_000;
 const HEIC_COLOR_TIMEOUT_MS = 15_000;
