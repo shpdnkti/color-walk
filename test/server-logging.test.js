@@ -192,6 +192,49 @@ test('unexpected errors log their type and sanitized stack without the error mes
   assert.doesNotMatch(errorLines[0], /must-not-appear|Unexpected token|Expected property/);
 });
 
+test('OpenAI transport failures omit exception details from upstream error logs', async (t) => {
+  const upstream = http.createServer(function (request) {
+    request.socket.destroy();
+  });
+  const upstreamPort = await listenOnLocalhost(upstream);
+  t.after(async function () { await closeServer(upstream); });
+
+  const originalEnv = captureOpenAIEnv();
+  process.env.OPENAI_API_KEY = 'test-key';
+  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:' + upstreamPort + '/v1';
+  t.after(function () { restoreOpenAIEnv(originalEnv); });
+
+  const errorLines = [];
+  const originalConsoleError = console.error;
+  console.error = function (line) { errorLines.push(line); };
+  t.after(function () { console.error = originalConsoleError; });
+
+  const app = createColorWalkServer();
+  const port = await listenOnLocalhost(app);
+  t.after(async function () { await closeServer(app); });
+
+  const response = await fetch('http://127.0.0.1:' + port + '/api/analyze-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      images: [{ dataUrl: 'data:image/png;base64,aGVsbG8=', fileName: 'sample.png' }],
+    }),
+  });
+  await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(errorLines.length, 1);
+  const entry = JSON.parse(errorLines[0]);
+  assert.equal(entry.errorCode, 'server_error');
+  assert.deepEqual(entry.upstream, {
+    service: 'openai',
+    status: null,
+    durationMs: entry.upstream.durationMs,
+  });
+  assert.equal('errorType' in entry, false);
+  assert.equal('stack' in entry, false);
+});
+
 function listenOnLocalhost(server) {
   return new Promise(function (resolve, reject) {
     server.once('error', reject);

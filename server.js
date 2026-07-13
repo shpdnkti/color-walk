@@ -324,6 +324,7 @@ function safeRequestId(value) {
 function captureUnexpectedError(response, error) {
   const context = response[REQUEST_LOG_CONTEXT];
   if (!context) return;
+  if (context.upstream?.status === null) return;
   context.errorType = typeof error?.name === 'string' ? error.name : 'Error';
   if (typeof error?.stack === 'string') {
     context.stack = error.stack.split('\n').slice(1).map(function (line) { return line.trim(); }).filter(Boolean).join('\n');
